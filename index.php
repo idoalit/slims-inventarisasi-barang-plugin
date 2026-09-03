@@ -53,6 +53,8 @@ if (empty($_SESSION['inventory_csrf'])) {
 $csrf = (string) $_SESSION['inventory_csrf'];
 $message = '';
 $messageType = 'success';
+$locations = [];
+$masterLocations = [];
 
 try {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -75,8 +77,20 @@ try {
             if ($roomName === '') {
                 throw new RuntimeException('Nama ruangan wajib diisi.');
             }
+            $slimsLocationId = inventory_post('slims_location_id');
+            if (strlen($slimsLocationId) > 3) {
+                throw new RuntimeException('Kode lokasi master SLiMS tidak valid.');
+            }
+            if ($slimsLocationId !== '') {
+                $masterLocationStatement = $db->prepare('SELECT 1 FROM mst_location WHERE location_id = ? LIMIT 1');
+                $masterLocationStatement->execute([$slimsLocationId]);
+                if (!$masterLocationStatement->fetchColumn()) {
+                    throw new RuntimeException('Lokasi master SLiMS yang dipilih tidak ditemukan.');
+                }
+            }
 
             $values = [
+                'slims_location_id' => $slimsLocationId === '' ? null : $slimsLocationId,
                 'location_code' => inventory_post('location_code') ?: null,
                 'room_name' => $roomName,
                 'province' => inventory_post('province'),
@@ -96,7 +110,7 @@ try {
             if ($id > 0) {
                 $values['id'] = $id;
                 $statement = $db->prepare(
-                    'UPDATE inventory_locations SET location_code=:location_code, room_name=:room_name, province=:province,
+                    'UPDATE inventory_locations SET slims_location_id=:slims_location_id, location_code=:location_code, room_name=:room_name, province=:province,
                      regency_city=:regency_city, unit_name=:unit_name, work_unit=:work_unit, signature_city=:signature_city,
                      knowing_title=:knowing_title, knowing_name=:knowing_name, knowing_identity=:knowing_identity,
                      manager_title=:manager_title, manager_name=:manager_name, manager_identity=:manager_identity,
@@ -110,10 +124,10 @@ try {
                 $values['created_at'] = $now;
                 $statement = $db->prepare(
                     'INSERT INTO inventory_locations
-                     (location_code, room_name, province, regency_city, unit_name, work_unit, signature_city,
+                     (slims_location_id, location_code, room_name, province, regency_city, unit_name, work_unit, signature_city,
                       knowing_title, knowing_name, knowing_identity, manager_title, manager_name, manager_identity,
                       created_by, created_at, updated_at)
-                     VALUES (:location_code, :room_name, :province, :regency_city, :unit_name, :work_unit, :signature_city,
+                     VALUES (:slims_location_id, :location_code, :room_name, :province, :regency_city, :unit_name, :work_unit, :signature_city,
                       :knowing_title, :knowing_name, :knowing_identity, :manager_title, :manager_name, :manager_identity,
                       :created_by, :created_at, :updated_at)'
                 );
@@ -213,25 +227,33 @@ try {
         }
     }
 
+    $masterLocations = $db->query(
+        'SELECT location_id, location_name FROM mst_location ORDER BY location_name, location_id'
+    )->fetchAll(PDO::FETCH_ASSOC);
     $locations = $db->query(
-        'SELECT l.*, COUNT(i.id) AS item_count
+        'SELECT l.*,
+                (SELECT ml.location_name FROM mst_location ml WHERE ml.location_id = l.slims_location_id LIMIT 1) AS slims_location_name,
+                COUNT(i.id) AS item_count
          FROM inventory_locations l LEFT JOIN inventory_items i ON i.location_id=l.id
          GROUP BY l.id ORDER BY l.room_name, l.location_code'
     )->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $exception) {
     error_log('Inventory database error: ' . $exception->getMessage());
     $locations = [];
+    $masterLocations = [];
     $messageType = 'danger';
     $message = str_contains(strtolower($exception->getMessage()), 'doesn\'t exist')
         ? 'Tabel inventaris belum tersedia. Aktifkan plugin Inventaris Barang dari menu System → Plugins.'
         : 'Operasi database gagal. Pastikan kode lokasi tidak duplikat dan data yang dimasukkan valid.';
 } catch (RuntimeException $exception) {
     $locations = [];
+    $masterLocations = [];
     $messageType = 'danger';
     $message = $exception->getMessage();
 } catch (Throwable $exception) {
     error_log('Inventory application error: ' . $exception->getMessage());
     $locations = [];
+    $masterLocations = [];
     $messageType = 'danger';
     $message = 'Terjadi kesalahan internal. Silakan coba lagi atau hubungi administrator.';
 }
@@ -278,7 +300,7 @@ $printBase = rtrim(SWB, '/') . '/plugins/inventaris-barang/print.php';
 <?php if (in_array($action, ['add_location', 'edit_location'], true) && $canWrite): ?>
     <?php
     $defaults = array_merge([
-        'id' => 0, 'location_code' => '', 'room_name' => '', 'province' => 'JAWA TENGAH',
+        'id' => 0, 'slims_location_id' => '', 'location_code' => '', 'room_name' => '', 'province' => 'JAWA TENGAH',
         'regency_city' => 'SEMARANG', 'unit_name' => 'PERPUSTAKAAN', 'work_unit' => '',
         'signature_city' => 'Semarang', 'knowing_title' => '', 'knowing_name' => '', 'knowing_identity' => '',
         'manager_title' => 'Pengurus Barang Inventaris', 'manager_name' => '', 'manager_identity' => '',
@@ -288,7 +310,8 @@ $printBase = rtrim(SWB, '/') . '/plugins/inventaris-barang/print.php';
         <form class="submitViaAJAX" method="post" action="<?= inventory_e(inventory_url()) ?>">
             <input type="hidden" name="csrf_token" value="<?= inventory_e($csrf) ?>"><input type="hidden" name="form_action" value="save_location"><input type="hidden" name="record_id" value="<?= (int) $defaults['id'] ?>">
             <div class="inventory-grid">
-                <div class="form-group"><label>Kode Lokasi</label><input class="form-control" name="location_code" maxlength="100" value="<?= inventory_e($defaults['location_code']) ?>"></div>
+                <div class="form-group"><label>Lokasi Master SLiMS</label><select class="form-control" name="slims_location_id"><option value="">Tidak ditentukan</option><?php foreach ($masterLocations as $masterLocation): ?><option value="<?= inventory_e($masterLocation['location_id']) ?>" <?= (string) $defaults['slims_location_id'] === (string) $masterLocation['location_id'] ? 'selected' : '' ?>><?= inventory_e($masterLocation['location_name'] . ' (' . $masterLocation['location_id'] . ')') ?></option><?php endforeach; ?></select><small class="form-text text-muted">Berasal dari master <code>mst_location</code> SLiMS.</small></div>
+                <div class="form-group"><label>No. Kode Lokasi Kartu</label><input class="form-control" name="location_code" maxlength="100" value="<?= inventory_e($defaults['location_code']) ?>"></div>
                 <div class="form-group"><label>Ruangan <span class="text-danger">*</span></label><input class="form-control" required name="room_name" maxlength="255" value="<?= inventory_e($defaults['room_name']) ?>"></div>
                 <div class="form-group"><label>Provinsi</label><input class="form-control" name="province" maxlength="150" value="<?= inventory_e($defaults['province']) ?>"></div>
                 <div class="form-group"><label>Kabupaten/Kota</label><input class="form-control" name="regency_city" maxlength="150" value="<?= inventory_e($defaults['regency_city']) ?>"></div>
@@ -341,6 +364,11 @@ $printBase = rtrim(SWB, '/') . '/plugins/inventaris-barang/print.php';
 <?php else: ?>
     <?php
     $selectedLocation = isset($_GET['location_id']) ? (int) $_GET['location_id'] : 0;
+    $selectedSlimsLocation = trim((string) ($_GET['slims_location_id'] ?? ''));
+    $availableMasterLocationIds = array_map('strval', array_column($masterLocations, 'location_id'));
+    if ($selectedSlimsLocation !== '' && !in_array($selectedSlimsLocation, $availableMasterLocationIds, true)) {
+        $selectedSlimsLocation = '';
+    }
     $keyword = trim((string) ($_GET['keywords'] ?? ''));
     $selectedLocationData = null;
     foreach ($locations as $location) {
@@ -353,11 +381,20 @@ $printBase = rtrim(SWB, '/') . '/plugins/inventaris-barang/print.php';
     if ($action === 'view_location' && $selectedLocationData === null) {
         $selectedLocation = 0;
     }
+    $displayLocations = $selectedSlimsLocation === ''
+        ? $locations
+        : array_values(array_filter(
+            $locations,
+            static fn (array $location): bool => (string) ($location['slims_location_id'] ?? '') === $selectedSlimsLocation
+        ));
     $criteria = [];
     $params = [];
     if ($selectedLocation > 0) { $criteria[] = 'i.location_id = :location_id'; $params['location_id'] = $selectedLocation; }
+    if ($selectedSlimsLocation !== '') { $criteria[] = 'l.slims_location_id = :slims_location_id'; $params['slims_location_id'] = $selectedSlimsLocation; }
     if ($keyword !== '') { $criteria[] = '(i.item_name LIKE :keyword OR i.item_code LIKE :keyword OR i.brand_model LIKE :keyword)'; $params['keyword'] = '%' . $keyword . '%'; }
-    $sql = 'SELECT i.*, l.room_name, l.location_code FROM inventory_items i JOIN inventory_locations l ON l.id=i.location_id';
+    $sql = 'SELECT i.*, l.room_name, l.location_code, l.slims_location_id, ml.location_name AS slims_location_name
+            FROM inventory_items i JOIN inventory_locations l ON l.id=i.location_id
+            LEFT JOIN mst_location ml ON ml.location_id=l.slims_location_id';
     if ($criteria) { $sql .= ' WHERE ' . implode(' AND ', $criteria); }
     $sql .= ' ORDER BY l.room_name, i.item_name, i.id LIMIT 500';
     try { $statement = $db->prepare($sql); $statement->execute($params); $items = $statement->fetchAll(PDO::FETCH_ASSOC); } catch (Throwable $ignored) { $items = []; }
@@ -367,6 +404,7 @@ $printBase = rtrim(SWB, '/') . '/plugins/inventaris-barang/print.php';
         <div class="inventory-grid">
             <div><strong>Kode Lokasi</strong><br><?= inventory_e($selectedLocationData['location_code'] ?: '-') ?></div>
             <div><strong>Ruangan</strong><br><?= inventory_e($selectedLocationData['room_name']) ?></div>
+            <div><strong>Lokasi Master SLiMS</strong><br><?= inventory_e($selectedLocationData['slims_location_name'] ?: '-') ?><?= $selectedLocationData['slims_location_id'] ? ' (' . inventory_e($selectedLocationData['slims_location_id']) . ')' : '' ?></div>
             <div><strong>Wilayah</strong><br><?= inventory_e(trim($selectedLocationData['regency_city'] . ', ' . $selectedLocationData['province'], ', ')) ?></div>
             <div><strong>Unit/Satuan Kerja</strong><br><?= inventory_e($selectedLocationData['unit_name']) ?> — <?= inventory_e($selectedLocationData['work_unit']) ?></div>
         </div>
@@ -379,9 +417,9 @@ $printBase = rtrim(SWB, '/') . '/plugins/inventaris-barang/print.php';
     <?php else: ?>
     <?php if ($action === 'view_location'): ?><div class="alert alert-warning m-3">Lokasi yang dipilih tidak ditemukan.</div><?php endif; ?>
     <div class="inventory-card"><div class="inventory-card-header">Lokasi/Ruangan</div><div class="inventory-card-body">
-        <?php if (!$locations): ?><div class="inventory-empty">Belum ada lokasi inventaris.</div><?php else: ?>
-        <div class="table-responsive"><table class="table table-striped table-bordered"><thead><tr><th>Kode</th><th>Ruangan</th><th>Wilayah</th><th>Unit/Satuan Kerja</th><th>Barang</th><th>Aksi</th></tr></thead><tbody>
-        <?php foreach ($locations as $location): ?><tr><td><?= inventory_e($location['location_code']) ?></td><td><?= inventory_e($location['room_name']) ?></td><td><?= inventory_e(trim($location['regency_city'] . ', ' . $location['province'], ', ')) ?></td><td><?= inventory_e($location['unit_name']) ?><br><small><?= inventory_e($location['work_unit']) ?></small></td><td class="text-center"><?= (int) $location['item_count'] ?></td><td><div class="inventory-actions">
+        <?php if (!$displayLocations): ?><div class="inventory-empty">Belum ada lokasi inventaris yang sesuai filter.</div><?php else: ?>
+        <div class="table-responsive"><table class="table table-striped table-bordered"><thead><tr><th>Lokasi SLiMS</th><th>Kode Kartu</th><th>Ruangan</th><th>Wilayah</th><th>Unit/Satuan Kerja</th><th>Barang</th><th>Aksi</th></tr></thead><tbody>
+        <?php foreach ($displayLocations as $location): ?><tr><td><?= inventory_e($location['slims_location_name'] ?: '-') ?><?php if ($location['slims_location_id']): ?><br><small><?= inventory_e($location['slims_location_id']) ?></small><?php endif; ?></td><td><?= inventory_e($location['location_code']) ?></td><td><?= inventory_e($location['room_name']) ?></td><td><?= inventory_e(trim($location['regency_city'] . ', ' . $location['province'], ', ')) ?></td><td><?= inventory_e($location['unit_name']) ?><br><small><?= inventory_e($location['work_unit']) ?></small></td><td class="text-center"><?= (int) $location['item_count'] ?></td><td><div class="inventory-actions">
             <a class="btn btn-sm btn-default" href="<?= inventory_e(inventory_url(['action' => 'view_location', 'location_id' => $location['id']])) ?>">Lihat Barang</a>
             <a class="btn btn-sm btn-success notAJAX" target="_blank" href="<?= inventory_e($printBase . '?' . http_build_query(['location_id' => $location['id']])) ?>">Cetak PDF</a>
             <?php if ($canWrite): ?><a class="btn btn-sm btn-primary" href="<?= inventory_e(inventory_url(['action' => 'edit_location', 'record_id' => $location['id']])) ?>">Ubah</a><a class="btn btn-sm btn-info" href="<?= inventory_e(inventory_url(['action' => 'add_item', 'location_id' => $location['id']])) ?>">Tambah Barang</a>
@@ -393,12 +431,12 @@ $printBase = rtrim(SWB, '/') . '/plugins/inventaris-barang/print.php';
 
     <div class="inventory-card"><div class="inventory-card-header"><?= $isLocationView ? 'Barang di ' . inventory_e($selectedLocationData['room_name']) : 'Daftar Barang' ?></div><div class="inventory-card-body">
         <form class="form-inline mb-3 submitViaAJAX" method="get" action="<?= inventory_e($_SERVER['PHP_SELF']) ?>"><?php foreach (['mod', 'id'] as $key): if (isset($_GET[$key])): ?><input type="hidden" name="<?= $key ?>" value="<?= inventory_e($_GET[$key]) ?>"><?php endif; endforeach; ?>
-            <?php if ($isLocationView): ?><input type="hidden" name="action" value="view_location"><input type="hidden" name="location_id" value="<?= $selectedLocation ?>"><?php else: ?><select class="form-control mr-2" name="location_id"><option value="0">Semua lokasi</option><?php foreach ($locations as $location): ?><option value="<?= (int) $location['id'] ?>" <?= $selectedLocation === (int) $location['id'] ? 'selected' : '' ?>><?= inventory_e($location['room_name']) ?></option><?php endforeach; ?></select><?php endif; ?>
+            <?php if ($isLocationView): ?><input type="hidden" name="action" value="view_location"><input type="hidden" name="location_id" value="<?= $selectedLocation ?>"><?php else: ?><select class="form-control mr-2" name="slims_location_id" title="Lokasi master SLiMS"><option value="">Semua lokasi master SLiMS</option><?php foreach ($masterLocations as $masterLocation): ?><option value="<?= inventory_e($masterLocation['location_id']) ?>" <?= $selectedSlimsLocation === (string) $masterLocation['location_id'] ? 'selected' : '' ?>><?= inventory_e($masterLocation['location_name'] . ' (' . $masterLocation['location_id'] . ')') ?></option><?php endforeach; ?></select><select class="form-control mr-2" name="location_id" title="Ruangan inventaris"><option value="0">Semua ruangan inventaris</option><?php foreach ($locations as $location): ?><option value="<?= (int) $location['id'] ?>" <?= $selectedLocation === (int) $location['id'] ? 'selected' : '' ?>><?= inventory_e($location['room_name']) ?></option><?php endforeach; ?></select><?php endif; ?>
             <input class="form-control mr-2" name="keywords" value="<?= inventory_e($keyword) ?>" placeholder="Nama, kode, atau merk"><button class="btn btn-default" type="submit">Filter</button>
             <?php if ($selectedLocation > 0 && !$isLocationView): ?><a class="btn btn-success ml-2 notAJAX" target="_blank" href="<?= inventory_e($printBase . '?' . http_build_query(['location_id' => $selectedLocation])) ?>">Cetak Lokasi Ini</a><?php endif; ?>
         </form>
         <?php if (!$items): ?><div class="inventory-empty">Belum ada barang yang sesuai filter.</div><?php else: ?><div class="table-responsive"><table class="table table-striped table-bordered"><thead><tr><th>Lokasi</th><th>Nama Barang</th><th>Merk/Model</th><th>Kode</th><th>Register</th><th>Harga</th><th>Kondisi</th><th>Aksi</th></tr></thead><tbody>
-        <?php foreach ($items as $item): ?><tr><td><?= inventory_e($item['room_name']) ?></td><td><?= inventory_e($item['item_name']) ?></td><td><?= inventory_e($item['brand_model']) ?></td><td><?= inventory_e($item['item_code']) ?></td><td><?= inventory_e($item['quantity_register']) ?></td><td class="text-right"><?= $item['acquisition_price'] > 0 ? 'Rp ' . inventory_e(number_format((float) $item['acquisition_price'], 0, ',', '.')) : '' ?></td><td><?= inventory_e($item['item_condition']) ?></td><td><div class="inventory-actions"><?php if ($canWrite): ?><a class="btn btn-sm btn-primary" href="<?= inventory_e(inventory_url(['action' => 'edit_item', 'record_id' => $item['id']])) ?>">Ubah</a><form class="submitViaAJAX" method="post" action="<?= inventory_e(inventory_url(['location_id' => $selectedLocation, 'keywords' => $keyword])) ?>" onsubmit="return confirm('Hapus barang ini?')"><input type="hidden" name="csrf_token" value="<?= inventory_e($csrf) ?>"><input type="hidden" name="form_action" value="delete_item"><input type="hidden" name="record_id" value="<?= (int) $item['id'] ?>"><button class="btn btn-sm btn-danger" type="submit">Hapus</button></form><?php endif; ?></div></td></tr><?php endforeach; ?>
+        <?php foreach ($items as $item): ?><tr><td><?= inventory_e($item['room_name']) ?><?php if ($item['slims_location_name']): ?><br><small><?= inventory_e($item['slims_location_name']) ?></small><?php endif; ?></td><td><?= inventory_e($item['item_name']) ?></td><td><?= inventory_e($item['brand_model']) ?></td><td><?= inventory_e($item['item_code']) ?></td><td><?= inventory_e($item['quantity_register']) ?></td><td class="text-right"><?= $item['acquisition_price'] > 0 ? 'Rp ' . inventory_e(number_format((float) $item['acquisition_price'], 0, ',', '.')) : '' ?></td><td><?= inventory_e($item['item_condition']) ?></td><td><div class="inventory-actions"><?php if ($canWrite): ?><a class="btn btn-sm btn-primary" href="<?= inventory_e(inventory_url(['action' => 'edit_item', 'record_id' => $item['id']])) ?>">Ubah</a><form class="submitViaAJAX" method="post" action="<?= inventory_e(inventory_url(['slims_location_id' => $selectedSlimsLocation, 'location_id' => $selectedLocation, 'keywords' => $keyword])) ?>" onsubmit="return confirm('Hapus barang ini?')"><input type="hidden" name="csrf_token" value="<?= inventory_e($csrf) ?>"><input type="hidden" name="form_action" value="delete_item"><input type="hidden" name="record_id" value="<?= (int) $item['id'] ?>"><button class="btn btn-sm btn-danger" type="submit">Hapus</button></form><?php endif; ?></div></td></tr><?php endforeach; ?>
         </tbody></table></div><?php endif; ?>
     </div></div>
 <?php endif; ?>

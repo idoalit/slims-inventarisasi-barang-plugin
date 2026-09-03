@@ -15,7 +15,8 @@ use Mpdf\Mpdf;
 use SLiMS\Plugins\Inventory\PdfTemplate;
 
 $location = [
-    'location_code' => 'SMG-01', 'room_name' => 'Ruang Referensi', 'province' => 'JAWA TENGAH',
+    'location_code' => 'SMG-01', 'slims_location_id' => 'SL', 'slims_location_name' => 'Perpustakaan Utama',
+    'room_name' => 'Ruang Referensi', 'province' => 'JAWA TENGAH',
     'regency_city' => 'SEMARANG', 'unit_name' => 'PERPUSTAKAAN',
     'work_unit' => 'POLTEKKES KEMENKES SEMARANG', 'signature_city' => 'Semarang',
     'knowing_title' => 'Direktur Poltekkes Kemenkes Semarang', 'knowing_name' => 'Dr. Contoh',

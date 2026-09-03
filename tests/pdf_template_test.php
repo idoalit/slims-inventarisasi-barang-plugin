@@ -8,6 +8,8 @@ use SLiMS\Plugins\Inventory\PdfTemplate;
 
 $location = [
     'location_code' => 'SMG-01',
+    'slims_location_id' => 'SL',
+    'slims_location_name' => 'Perpustakaan Utama',
     'room_name' => 'Ruang & Referensi',
     'province' => 'JAWA TENGAH',
     'regency_city' => 'SEMARANG',
@@ -39,6 +41,7 @@ $html = PdfTemplate::render($location, $items, new DateTimeImmutable('2026-02-12
 $checks = [
     'judul kartu' => str_contains($html, 'KARTU INVENTARIS RUANGAN'),
     'lokasi di-escape' => str_contains($html, 'Ruang &amp; Referensi'),
+    'master lokasi SLiMS ditampilkan' => str_contains($html, 'Perpustakaan Utama (SL)'),
     'nama barang di-escape' => str_contains($html, '&lt;Meja baca&gt;'),
     'tanggal Indonesia' => str_contains($html, '12 Februari 2026'),
     'harga Indonesia' => str_contains($html, '1.500.000'),

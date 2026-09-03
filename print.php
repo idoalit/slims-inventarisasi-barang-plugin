@@ -62,7 +62,12 @@ try {
     $db = \SLiMS\DB::getInstance();
     $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    $statement = $db->prepare('SELECT * FROM inventory_locations WHERE id = ?');
+    $statement = $db->prepare(
+        'SELECT l.*, ml.location_name AS slims_location_name
+         FROM inventory_locations l
+         LEFT JOIN mst_location ml ON ml.location_id = l.slims_location_id
+         WHERE l.id = ?'
+    );
     $statement->execute([$locationId]);
     $location = $statement->fetch(PDO::FETCH_ASSOC);
     if (!$location) {

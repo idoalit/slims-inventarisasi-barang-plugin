@@ -1,9 +1,9 @@
 <?php
 /**
  * Plugin Name: Inventaris Barang Perpustakaan
- * Plugin URI: https://github.com/idoalit/slims9_bulian
+ * Plugin URI: https://github.com/idoalit/slims-inventarisasi-barang-plugin
  * Description: Pencatatan inventaris barang per lokasi/ruangan dan pencetakan Kartu Inventaris Ruangan dalam format PDF.
- * Version: 1.1.0
+ * Version: 1.2.0
  * Author: Waris Agung Widodo
  * Author URI: https://github.com/idoalit
  */
