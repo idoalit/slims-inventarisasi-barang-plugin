@@ -434,7 +434,7 @@ $printBase = AWB . 'plugin_container.php?' . http_build_query([
     $defaults = array_merge([
         'id' => 0, 'location_id' => '', 'item_name' => '', 'brand_model' => '', 'serial_number' => '',
         'item_size' => '', 'material' => '', 'acquisition_year' => '', 'item_code' => '', 'quantity_register' => '',
-        'acquisition_price' => '', 'item_condition' => 'B', 'notes' => '',
+        'acquisition_price' => 0, 'item_condition' => 'B', 'notes' => '',
     ], $itemForm);
     ?>
     <div class="inventory-card"><div class="inventory-card-header"><?= $defaults['id'] ? 'Ubah Barang' : 'Tambah Barang' ?></div><div class="inventory-card-body">
