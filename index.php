@@ -493,7 +493,6 @@ $printBase = AWB . 'plugin_container.php?' . http_build_query([
                 </div>
             </div>
             <div class="inventory-actions">
-                <a class="btn btn-sm btn-default" href="<?= inventory_e(inventory_url()) ?>">Kembali ke Daftar Lokasi</a>
                 <a class="btn btn-sm btn-success notAJAX" target="_blank" href="<?= inventory_e($printBase . '&' . http_build_query(['location_id' => $selectedLocation])) ?>">Cetak PDF</a>
                 <?php if ($canWrite): ?><a class="btn btn-sm btn-primary" href="<?= inventory_e(inventory_url(['action' => 'add_item', 'location_id' => $selectedLocation])) ?>">Tambah Barang</a><?php endif; ?>
             </div>
