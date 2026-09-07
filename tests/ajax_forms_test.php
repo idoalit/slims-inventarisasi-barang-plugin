@@ -7,8 +7,8 @@ preg_match_all('/<form\b[^>]*>/i', $source, $matches);
 $forms = $matches[0] ?? [];
 $failures = [];
 
-if (count($forms) !== 5) {
-    $failures[] = 'jumlah form berubah: ditemukan ' . count($forms) . ', diharapkan 5';
+if (count($forms) !== 4) {
+    $failures[] = 'jumlah form berubah: ditemukan ' . count($forms) . ', diharapkan 4';
 }
 foreach ($forms as $index => $form) {
     if (!preg_match('/class="[^"]*\bsubmitViaAJAX\b[^"]*"/i', $form)) {

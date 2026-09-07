@@ -90,7 +90,7 @@ final class PdfTemplate
             . '<tr><td class="label">KABUPATEN/KOTA</td><td class="colon">:</td><td class="value">' . self::value($location, 'regency_city') . '</td>'
             . '<td class="label">RUANGAN</td><td class="colon">:</td><td class="value">' . self::value($location, 'room_name') . '</td></tr>'
             . '<tr><td class="label">UNIT</td><td class="colon">:</td><td class="value">' . self::value($location, 'unit_name') . '</td>'
-            . '<td class="label">LOKASI SLIMS</td><td class="colon">:</td><td class="value">' . self::masterLocation($location) . '</td></tr>'
+            . '<td class="label">LOKASI</td><td class="colon">:</td><td class="value">' . self::masterLocation($location) . '</td></tr>'
             . '<tr><td class="label">SATUAN KERJA</td><td class="colon">:</td><td class="value" colspan="4">' . self::value($location, 'work_unit') . '</td></tr></table>'
             . '<table class="inventory"><thead><tr>'
             . '<th width="3.2%" rowspan="2">NO</th><th width="15.2%" rowspan="2">JENIS BARANG/<br>NAMA BARANG</th><th width="6.5%" rowspan="2">MERK/<br>MODEL</th><th width="5.8%" rowspan="2">NO. SERI<br>PABRIK</th><th width="7.4%" rowspan="2">UKURAN</th><th width="7.1%" rowspan="2">BAHAN</th>'

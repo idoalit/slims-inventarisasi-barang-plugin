@@ -1,7 +1,6 @@
 <?php
 
-define('INDEX_AUTH', 1);
-require_once __DIR__ . '/../../sysconfig.inc.php';
+defined('INDEX_AUTH') || die('Direct access not allowed!');
 $pluginAutoload = __DIR__ . '/vendor/autoload.php';
 if (is_file($pluginAutoload)) {
     require_once $pluginAutoload;
