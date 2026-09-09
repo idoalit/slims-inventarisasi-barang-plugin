@@ -5,19 +5,21 @@ Plugin SLiMS 9 untuk mencatat inventaris barang per lokasi/ruangan dan mencetak 
 ## Instalasi
 
 1. Tempatkan plugin di `plugins/inventaris-barang` pada instalasi SLiMS.
-2. Pastikan PHP memiliki ekstensi GD dan mbstring, lalu jalankan dari direktori plugin:
+2. Pastikan PHP memiliki ekstensi GD, mbstring, dan fileinfo, lalu jalankan dari direktori plugin:
 
    ```bash
    composer install --no-dev
    ```
 
 3. Pastikan direktori cache SLiMS (`files/cache` pada konfigurasi standar) dapat ditulis oleh proses PHP.
-4. Masuk sebagai administrator, buka **System → Plugins**, lalu aktifkan **Inventaris Barang Perpustakaan**. Migrasi plugin membuat tabel `inventory_locations` dan `inventory_items` serta menambahkan referensi ke master lokasi perpustakaan (`mst_location`).
+4. Masuk sebagai administrator, buka **System → Plugins**, lalu aktifkan **Inventaris Barang Perpustakaan**. Migrasi plugin membuat tabel `inventory_locations` dan `inventory_items` serta menambahkan referensi ke master lokasi perpustakaan (`mst_location`). Migrasi versi 3 membuat tabel metadata foto `inventory_item_photos`. Migrasi versi 4 memindahkan foto dari penyimpanan BLOB versi sebelumnya ke folder gambar, jika sudah ada.
 5. Buka **Stock Take → Inventaris Barang**.
 
-Pada pembaruan instalasi lama, jalankan migrasi plugin melalui **System → Plugins**. Migrasi versi 2 menambahkan referensi master lokasi tanpa menghapus data lama. Hubungkan ruangan yang sudah ada melalui ikon edit pada daftar lokasi.
+Pada pembaruan instalasi lama, jalankan migrasi plugin melalui **System → Plugins**. Migrasi versi 2 menambahkan referensi master lokasi tanpa menghapus data lama. Hubungkan ruangan yang sudah ada melalui ikon edit pada daftar lokasi. Saat memperbarui ke versi 1.3.0, jalankan semua migrasi hingga versi 4 sebelum menggunakan form barang atau galeri foto. Jika versi 3 dengan kolom BLOB sudah dijalankan, migrasi versi 4 memindahkan foto lama dan menghapus kolom BLOB jika seluruh foto berhasil dipindahkan. Jika data foto lama rusak, data itu dipertahankan untuk pemulihan dan ditampilkan sebagai foto yang tidak dapat dibaca; unggahan baru tetap disimpan ke folder. Unggah ulang sumber foto aslinya dan hapus entri rusak melalui tombol **Hapus Foto**. Cadangkan database sebelum migrasi; rollback otomatis migrasi versi 4 tidak tersedia.
 
 Dependensi PDF dideklarasikan sebagai `mpdf/mpdf: ^8.3.1`; `composer install` memasang versi yang tercatat di `composer.lock`. Folder `vendor` tidak disimpan dalam Git. Jika kode dan dependensi disalin ke image container saat build, perubahan memerlukan rebuild image, lalu recreate container.
+
+Pada versi 1.3.1, jalankan migrasi hingga versi 5 melalui **System → Plugins**. Migrasi ini mengganti indeks unik kode lokasi kartu dengan indeks biasa sehingga beberapa ruangan dapat memakai kode lokasi yang sama, tanpa mengubah data ruangan atau barang. Rollback versi 5 hanya dapat dilakukan jika kode lokasi yang terisi tidak lagi duplikat.
 
 ## Penggunaan
 
@@ -25,6 +27,7 @@ Dependensi PDF dideklarasikan sebagai `mpdf/mpdf: ^8.3.1`; `composer install` me
 
 - Halaman awal hanya menampilkan lokasi/ruangan beserta jumlah barangnya. Gunakan **Filter Lokasi** untuk menyaring berdasarkan lokasi master SLiMS.
 - Klik **Tambah Lokasi** untuk mencatat ruangan dan identitas yang akan tampil pada kartu inventaris.
+- Beberapa ruangan dapat menggunakan **Lokasi Perpustakaan** dan **No. Kode Lokasi Kartu** yang sama. Barang tetap dicatat terpisah berdasarkan ruangan.
 - Klik **Lihat Barang** pada ruangan untuk membuka daftar barang di dalamnya.
 
 ### Barang dalam ruangan
@@ -33,8 +36,36 @@ Bagian atas halaman menampilkan ringkasan nama ruangan, kode, lokasi master, dan
 
 - Klik **Tambah Barang** untuk mencatat barang pada ruangan tersebut.
 - Gunakan pencarian berdasarkan nama barang, kode, atau merk/model.
-- Setelah menyimpan barang, halaman menampilkan ruangan tempat barang disimpan, termasuk jika barang dipindahkan ke ruangan lain. Setelah menghapus barang, halaman tetap menampilkan ruangan yang sedang dibuka.
+- Setelah menyimpan barang, halaman kembali ke daftar barang di ruangan tempat barang disimpan, disertai pesan **Barang berhasil disimpan.** Ini juga berlaku jika barang dipindahkan ke ruangan lain. Setelah menghapus barang, halaman tetap menampilkan ruangan yang sedang dibuka.
 - Klik **Kembali ke Daftar Lokasi** untuk memilih ruangan lain.
+
+### Foto barang
+
+Pada form **Tambah Barang** atau **Ubah Barang**, gunakan **Tambah foto** untuk memilih beberapa foto, pratinjau file yang dipilih langsung muncul sebelum dikirim. Klik **Simpan Barang** untuk mengunggahnya. Setelah berhasil, halaman kembali ke daftar barang dengan pesan konfirmasi. Klik nama barang untuk melihat foto yang sudah tersimpan di galeri. Foto bersifat opsional.
+
+- Maksimal **5 foto per barang**, termasuk foto yang sudah tersimpan.
+- Setiap unggahan maksimal **2 MB**, dalam format **JPEG, PNG, atau WebP**. Resolusi maksimal 8 megapiksel dan 4096 piksel per sisi.
+- Foto lama tampil sebagai pratinjau pada form edit. Klik **Hapus Foto** di bawah foto, lalu konfirmasi untuk langsung menghapus foto tersebut. Tombol tersedia pada form edit dan galeri bagi pengguna dengan hak tulis. Foto lain dan isian form yang belum disimpan tetap dipertahankan.
+- Klik nama barang di datagrid untuk membuka galeri. Pengguna dengan hak baca dapat melihat foto; penambahan dan penghapusan memerlukan hak tulis.
+- Foto tidak dimasukkan ke PDF Kartu Inventaris Ruangan.
+
+Server memeriksa isi gambar, bukan nama atau MIME yang dikirim browser. Gambar didekode dan dikodekan ulang menjadi JPEG dengan sisi terpanjang maksimal 1280 piksel; berkas asli, metadata, dan nama berkas unggahan tidak disimpan. Berkas JPEG disimpan di `images/inventaris-barang` dengan nama acak 64 karakter dan ekstensi `.jpg`. Database hanya menyimpan ID barang, nama berkas, dan waktu unggah. Nama asli pengguna tidak dipakai sebagai path. Endpoint pembaca tetap memeriksa sesi admin serta hak baca inventaris; path traversal dan symbolic link ditolak. Respons gambar memakai `nosniff` dan `private, no-store`.
+
+Penyimpanan barang dan metadata foto baru memakai satu transaksi database. Penghapusan satu foto memakai transaksi terpisah dengan pemeriksaan hak tulis, CSRF, dan kecocokan ID foto dengan barangnya. Berkas baru dibersihkan bila penyimpanan gagal; penghapusan berkas lama dilakukan setelah commit berhasil. Pemeriksaan kepemilikan foto dan batas jumlah dilakukan dengan mengunci baris barang untuk mencegah unggahan bersamaan melewati batas. Penghapusan barang atau ruangan melalui plugin membersihkan berkas foto setelah transaksi berhasil. Foreign key menghapus metadata foto, tetapi penghapusan langsung melalui SQL tidak membersihkan berkas. Cadangkan database dan folder foto bersama-sama. Kegagalan pembersihan berkas dicatat di log PHP; penghentian proses secara mendadak dapat meninggalkan berkas tanpa metadata.
+
+Folder foto dibuat oleh proses PHP dengan izin direktori `0700` dan berkas `0600`. Proses PHP harus bisa menulis di `images`. Jika memakai container, simpan folder gambar pada volume persisten.
+
+Akses HTTP langsung ke folder foto diblokir oleh `.htaccess` yang dibuat otomatis; Apache harus mengizinkan aturan ini melalui `AllowOverride`. Untuk Nginx yang tidak membaca `.htaccess`, tambahkan aturan penolakan berikut pada konfigurasi server (sesuaikan awalan `/opac` jika instalasi memakai subdirektori), lalu muat ulang konfigurasi:
+
+```nginx
+location ^~ /opac/images/inventaris-barang/ {
+    deny all;
+}
+```
+
+Pastikan URL langsung foto menghasilkan 403, sementara pratinjau melalui panel admin tetap tampil. Jangan membuat pengecualian eksekusi PHP untuk folder ini.
+
+Agar lima foto berukuran 2 MB dapat dikirim sekaligus, sesuaikan batas server: `upload_max_filesize` setidaknya `2M`, `post_max_size` setidaknya `12M`, dan `max_file_uploads` setidaknya `5`, beserta batas request pada proxy/web server. Batas aplikasi tetap berlaku meskipun konfigurasi server lebih longgar.
 
 ### Mengubah dan menghapus data
 
@@ -62,7 +93,7 @@ Klik **Cetak PDF** pada daftar lokasi atau halaman ruangan. Dokumen dibuka di ta
 
 ## Integrasi SLiMS
 
-Formulir pengelolaan dan filter memakai handler AJAX `submitViaAJAX`. Edit dan penghapusan melalui datagrid memakai mekanisme standar SLiMS; formulir penghapusan dilengkapi token CSRF plugin dan responsnya memperbarui daftar di panel admin.
+Formulir lokasi dan filter memakai handler AJAX `submitViaAJAX`. Form barang memakai pengiriman multipart `FormData` agar berkas foto ikut terkirim; setelah berhasil, daftar barang di ruangan tujuan dimuat melalui `simbioAJAX` dengan pesan konfirmasi. Jika validasi gagal, pesan tampil pada form agar pengguna dapat memperbaikinya. Edit dan penghapusan melalui datagrid memakai mekanisme standar SLiMS; formulir penghapusan dilengkapi token CSRF plugin dan responsnya memperbarui daftar di panel admin.
 
 Hak akses mengikuti modul `stock_take`. Perubahan data memerlukan hak tulis dan token CSRF. Penghapusan barang melalui daftar ruangan dibatasi ke ruangan yang sedang dibuka. Aktivitas tambah, ubah, hapus, penolakan keamanan, dan pencetakan dicatat melalui system log SLiMS.
 
@@ -71,6 +102,7 @@ PDF diproses melalui `admin/plugin_container.php` dengan aksi `print_pdf`, memer
 ## Pemecahan masalah
 
 - **Kode PHP tampil saat mencetak:** buka ulang menu plugin dan gunakan tombol **Cetak PDF**. Jangan mengakses `plugins/inventaris-barang/print.php` langsung; konfigurasi `plugins/.htaccess` SLiMS menonaktifkan eksekusi PHP langsung pada handler yang terkait.
+- **Gagal simpan dengan kolom `filename` tidak ditemukan:** skema foto masih memakai versi BLOB. Jalankan migrasi hingga versi 4; data foto lama yang dapat dibaca dipindahkan ke folder dan data rusak tetap dipertahankan.
 - **PDF gagal dibuat:** periksa log PHP, pemasangan dependensi Composer, dan izin tulis direktori cache SLiMS.
 - **Error kompatibilitas `setLogger(...): void`:** periksa pustaka mPDF dan PSR Log yang dimuat oleh instalasi utama maupun plugin. Jika error menunjuk ke `lib/psr-log-aware-trait`, kedua trait bawaan SLiMS (`MpdfPsrLogAwareTrait.php` dan `PsrLogAwareTrait.php`) perlu deklarasi `setLogger(LoggerInterface $logger): void` yang kompatibel. Perbaikan pustaka utama ini berada di luar repositori plugin; pastikan ikut terpasang pada server atau image container.
 
@@ -83,7 +115,10 @@ php tests/pdf_template_test.php
 php tests/ajax_forms_test.php
 php tests/security_controls_test.php
 php tests/master_location_integration_test.php
+php tests/item_photos_test.php
 ```
+
+Tes regresi kode lokasi memerlukan PDO MySQL dan koneksi database melalui variabel lingkungan `INVENTORY_TEST_DSN`, `INVENTORY_TEST_USER`, dan `INVENTORY_TEST_PASSWORD`. Jalankan `php tests/shared_location_codes_test.php`. Tes memakai tabel sementara pada koneksinya sendiri, mereproduksi penolakan kode duplikat pada skema lama, lalu memeriksa bahwa migrasi versi 5 mempertahankan data dan mengizinkan ruangan terpisah dengan lokasi serta kode kartu yang sama.
 
 Setelah dependensi Composer tersedia, uji pembuatan PDF:
 
@@ -92,4 +127,74 @@ php tests/mpdf_runtime_test.php
 php tests/render_pdf_sample.php /tmp/inventory-sample.pdf
 ```
 
-Tes runtime memeriksa bahwa mPDF berasal dari instalasi Composer dan dapat menghasilkan PDF. Tes ini memerlukan ekstensi GD dan mbstring. Pemeriksaan otomatis tersebut tidak menggantikan uji alur login, edit, hapus, dan cetak melalui browser pada instalasi tujuan.
+Tes runtime memeriksa bahwa mPDF berasal dari instalasi Composer dan dapat menghasilkan PDF. Tes ini memerlukan ekstensi GD, mbstring, dan fileinfo. Tes foto memeriksa validasi gambar dan aturan perubahan foto dengan pengganti koneksi PDO, tanpa database aktif. Pemeriksaan otomatis tersebut tidak menggantikan uji alur login, edit, hapus, dan cetak melalui browser pada instalasi tujuan.
+
+### Tombol Buat Kode (versi 1.4.0)
+
+Jalankan migrasi plugin **hingga versi 6** melalui **System → Plugins** sebelum memakai form barang versi 1.4.0. Migrasi menambahkan tabel `inventory_item_code_sequences` dan `inventory_item_code_reservations`; data barang lama tidak diubah. Cadangkan kedua tabel bersama database inventaris. Rollback versi 6 tidak tersedia karena penghitung dan riwayat reservasi harus dipertahankan agar nomor tidak digunakan ulang.
+
+Pada form Tambah/Ubah Barang, pilih ruangan lalu klik **Buat Kode** di samping **No. Kode Barang**. Ruangan harus terhubung ke master **Lokasi Perpustakaan** SLiMS. Contoh hasil: `P01-INV-000001`, dengan `P01` berasal dari kode master, bukan No. Kode Lokasi Kartu. Semua ruangan dalam satu perpustakaan memakai urutan bersama; perpustakaan berbeda memiliki urutan terpisah. Nomor tidak direset tahunan dan memiliki minimal enam digit.
+
+Kode hanya dibuat melalui tombol. Kolom tetap dapat diisi manual atau dibiarkan kosong saat menyimpan. Jika sudah terisi, tombol meminta konfirmasi sebelum menggantinya. Memindahkan barang ke ruangan lain tidak mengubah kode; klik tombol kembali jika menginginkan kode baru berdasarkan lokasi tujuan. Satu kode berlaku untuk satu catatan barang, bukan setiap unit pada jumlah/register.
+
+Nomor dipesan secara permanen saat tombol berhasil dan tetap sama saat barang disimpan. Pembatalan form, penggantian kode, atau respons jaringan yang hilang dapat membuat urutan berlubang. Nomor yang sudah dipesan tidak digunakan ulang. Reservasi terikat pada token form dan sesi pengguna; gunakan form yang sama untuk menyimpan kode tersebut. Jika penyimpanan barang/foto gagal, perbaiki data dan coba simpan kembali tanpa memuat ulang form. Jika form atau sesi sudah ditutup, buat nomor baru.
+
+Kode manual baru/yang diubah ditolak jika sudah dipakai barang lain atau dipesan form lain. Kode duplikat lama tetap dapat disimpan tanpa perubahan. Penghitung awal melanjutkan nomor terbesar kode lama yang sesuai pola; alokasi selanjutnya melewati kode yang sudah digunakan. Penguncian database menyelaraskan alokasi dan penyimpanan barang, sedangkan konsumsi reservasi berada dalam transaksi barang/foto.
+
+Tes tambahan:
+
+```sh
+node tests/item_codes_form_test.cjs
+php tests/item_codes_test.php
+```
+
+Tes PHP membutuhkan PDO MySQL serta `INVENTORY_TEST_DSN`, `INVENTORY_TEST_USER`, dan `INVENTORY_TEST_PASSWORD`. Gunakan database pengujian dengan izin membuat/menghapus tabel dan menjalankan subprocess PHP. Tes memakai tabel terisolasi bernama acak `ic_test_*`, membersihkannya setelah selesai, dan menguji konkurensi lewat dua koneksi. Tes tidak membaca atau mengubah data aplikasi.
+
+## Pengawasan & Pemeliharaan (versi 1.5.0)
+
+Jalankan migrasi plugin **hingga versi 7** melalui **System → Plugins**, lalu buka menu **Pengawasan & Pemeliharaan** di modul stock take. Migrasi menambahkan tabel `inventory_watch_*` tanpa mengubah kondisi atau kode barang. Migrasi versi 6 tetap diperlukan untuk form inventaris. Migrasi versi 7 tidak menyediakan rollback penghapusan karena dokumen pemeriksaan merupakan bukti historis.
+
+### Alur penggunaan
+
+1. **Checklist & Jadwal:** salin template contoh dan sesuaikan butir Sarana, Prasarana, serta Lingkungan Fisik. Isi objek dan petunjuk setiap butir; kosongkan objek untuk menghilangkannya pada versi baru. Maksimal 100 butir per template. Contoh bukan standar penilaian resmi.
+2. Pilih ruangan dan template, klik **Pilih cakupan**, lalu hubungkan tiap butir ke barang di ruangan tersebut atau pilih **Aspek ruangan**. Tentukan penanggung jawab, frekuensi, dan tanggal mulai/akhir. Frekuensi tersedia dari harian hingga tahunan. Jadwal tanggal 31 menggunakan akhir bulan pendek, lalu kembali ke tanggal 31 pada bulan yang memungkinkan.
+3. Menu otomatis mengirim POST terlindungi CSRF saat dibuka oleh pengguna dengan hak tulis. Setiap batch membentuk maksimal 50 pemeriksaan yang jatuh tempo, termasuk yang terlewat; batch dilanjutkan sampai selesai. Klik **Perbarui tampilan** setelah sinkronisasi. Tanpa cron atau notifikasi eksternal. Pengguna hak baca tidak memicu pembentukan data, tetapi dapat melihat jumlah jadwal yang belum dibentuk.
+4. **Pemeriksaan:** isi tanggal pelaksanaan sebenarnya, catatan, dan hasil setiap butir. Hasil selain **Baik** wajib memiliki alasan saat finalisasi. **Perlu tindakan** juga wajib memiliki penanggung jawab, prioritas, dan tenggat. Simpan draf sebelum mengelola foto melalui bagian **Kelola foto bukti per butir**, karena setiap penyimpanan foto memuat ulang dokumen.
+5. Finalisasi mengunci checklist dan foto, serta membuat satu temuan per butir yang perlu tindakan. Hasil baik juga disimpan sebagai dokumen. Koreksi berikutnya berupa catatan tambahan; gunakan **Pemeriksaan ulang** untuk kegiatan baru yang terhubung ke dokumen asal. Pemeriksaan insidental membutuhkan alasan dan dilaporkan terpisah dari kegiatan rutin.
+6. **Tindak Lanjut:** mulai pekerjaan, catat perbaikan/pemeliharaan, tanggal, dan biaya opsional. Pengguna yang menyimpan tercatat sebagai pelaksana. Pengajuan membutuhkan catatan serta minimal satu foto hasil. **Tanpa pekerjaan** membutuhkan alasan tetapi tidak mewajibkan foto.
+7. Verifikator mengisi catatan hasil, lalu menerima atau mengembalikan pekerjaan untuk perbaikan. Verifikasi sendiri diperbolehkan. Bukti yang pernah diajukan tidak dapat dihapus; setelah penolakan, pengajuan berikutnya menjadi catatan tindakan baru.
+8. **Laporan:** pilih perpustakaan, ruangan, dan periode. Cetak PDF periode atau PDF detail pemeriksaan yang berisi checklist, foto, temuan, dan riwayat verifikasi. Ekspor periode menolak lebih dari 500 pemeriksaan tanpa memotong data. PDF detail dibatasi 500 foto dan memakai thumbnail untuk menjaga penggunaan memori. Persempit periode jika laporan besar.
+
+### Versi jadwal dan histori
+
+Template yang disalin/direvisi disimpan sebagai versi baru. Jadwal lama tetap memakai checklist dan cakupan yang sudah disetujui. Gunakan **Ganti jadwal** untuk menerapkan versi baru dengan tanggal efektif setelah awal jadwal lama dan tidak di masa lalu. Jadwal lama berakhir sehari sebelum tanggal tersebut. Jadwal tidak dapat diganti/dihentikan pada tanggal yang pemeriksaannya sudah terbentuk; gunakan tanggal berikutnya. Penghentian tidak menghapus pemeriksaan yang sudah ada.
+
+Identitas perpustakaan, ruangan, barang, checklist, penanggung jawab, dan pemeriksa disalin ke dokumen. Perpindahan atau penghapusan barang tidak mengubah bukti. Penghapusan ruangan melalui inventaris menonaktifkan jadwal, mengosongkan referensi ruangan, dan mempertahankan seluruh riwayat pengawasan. Penghapusan ruangan langsung melalui SQL mengosongkan referensi melalui foreign key; sinkronisasi berikutnya menonaktifkan jadwal, dan dashboard langsung mengecualikannya dari pembentukan mendatang.
+
+Kondisi inventaris B/KB/RB tidak otomatis diperbarui dari checklist. Petugas dapat memperbarui kondisi inventaris melalui form barang bila diperlukan.
+
+### Makna indikator
+
+- Filter periode memakai tanggal jadwal untuk pemeriksaan rutin dan tanggal pencatatan untuk insidental. Status temuan adalah status terkini dari pemeriksaan dalam periode itu.
+- Rencana rutin mencakup seluruh tanggal dalam periode, termasuk yang belum jatuh tempo. Terlambat berarti jadwal sudah lewat dan pemeriksaan belum final; angka ini juga mencakup jadwal terlewat yang belum dibentuk.
+- Cakupan ruangan membandingkan ruangan yang memiliki hasil final diperiksa dengan ruangan dalam jadwal periode. Ruangan aktif tanpa jadwal periode ditampilkan terpisah.
+- Cakupan butir memakai pemeriksaan rutin yang terbentuk serta jadwal yang sudah jatuh tempo. Hanya hasil final **Baik/Perlu tindakan** dihitung diperiksa. **Tidak diperiksa**, butir belum terisi, dan draf tetap dalam penyebut; **Tidak berlaku** dikeluarkan dan jumlahnya ditampilkan terpisah.
+- Tidak ada konversi otomatis ke nilai a–d. Laporan menyediakan bukti untuk penilai.
+
+### Akses dan penyimpanan bukti
+
+Hak akses mengikuti `stock_take`: baca untuk dashboard, dokumen, foto, dan PDF; tulis untuk seluruh perubahan, termasuk verifikasi. Penugasan tidak membatasi akses per petugas. Endpoint tetap memeriksa sesi admin, cakupan IP, CSRF, kepemilikan foto terhadap dokumen, dan versi data saat menyimpan. Konflik perubahan meminta pengguna memuat ulang; hasil final dan riwayat verifikasi tidak ditimpa.
+
+Foto bukti disimpan terpisah di `images/inventaris-barang/pengawasan`, dengan metadata pada `inventory_watch_photos`. Gunakan aturan penolakan akses HTTP folder `images/inventaris-barang` yang sudah dijelaskan pada bagian foto barang; aturan tersebut juga melindungi subfolder pengawasan. Pembacaan gambar hanya melalui endpoint admin. Maksimal lima foto per hasil/catatan, masing-masing 2 MB; gambar dinormalisasi ke JPEG dengan batas resolusi yang sama seperti foto barang. Pastikan `post_max_size` server cukup untuk seluruh unggahan (misalnya 12 MB untuk lima foto 2 MB).
+
+Cadangkan seluruh tabel `inventory_watch_*` bersama folder bukti. Penyimpanan metadata dan transisi status memakai transaksi/penguncian; berkas baru dibersihkan saat rollback dan berkas draf yang dihapus dibersihkan setelah commit. Seperti galeri barang, penghentian proses mendadak dapat meninggalkan berkas tanpa metadata. PDF dibatasi sepuluh permintaan per menit per sesi dan tidak disimpan pada cache publik.
+
+### Pengujian pengawasan
+
+```sh
+php tests/watch_recurrence_test.php
+node tests/watch_forms_test.cjs
+php tests/watch_integration_test.php
+```
+
+Tes integrasi memakai `INVENTORY_TEST_DSN`, `INVENTORY_TEST_USER`, dan `INVENTORY_TEST_PASSWORD`. Gunakan database pengujian dengan izin CREATE/DROP TABLE serta TRIGGER, PHP PDO MySQL, GD, cURL, dan izin subprocess/server HTTP localhost. Seluruh tabel fixture bernama acak `iw_test_*`, tidak membaca data aplikasi, dan dibersihkan setelah pengujian. Tes meliputi konkurensi, alur lengkap, endpoint hak akses/CSRF, unggahan multipart, rollback berkas, histori setelah penghapusan, cakupan, dan HTML laporan. Jika autoloader Composer tersedia, tes juga menghasilkan PDF biner; autoloader pengujian terpisah dapat ditentukan melalui `INVENTORY_TEST_AUTOLOAD`.

@@ -30,7 +30,7 @@ $items = [[
     'item_size' => '120 cm',
     'material' => 'Kayu',
     'acquisition_year' => 2026,
-    'item_code' => 'INV-001',
+    'item_code' => 'P01-INV-000001',
     'quantity_register' => '1 / 001',
     'acquisition_price' => 1500000,
     'item_condition' => 'KB',
@@ -39,6 +39,7 @@ $items = [[
 
 $html = PdfTemplate::render($location, $items, new DateTimeImmutable('2026-02-12'));
 $checks = [
+    'kode barang otomatis ditampilkan' => str_contains($html, 'P01-INV-000001'),
     'judul kartu' => str_contains($html, 'KARTU INVENTARIS RUANGAN'),
     'lokasi di-escape' => str_contains($html, 'Ruang &amp; Referensi'),
     'master lokasi SLiMS ditampilkan' => str_contains($html, 'Perpustakaan Utama (SL)'),
