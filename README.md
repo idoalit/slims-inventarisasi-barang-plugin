@@ -152,14 +152,14 @@ Tes PHP membutuhkan PDO MySQL serta `INVENTORY_TEST_DSN`, `INVENTORY_TEST_USER`,
 
 ## Pengawasan & Pemeliharaan (versi 1.5.0)
 
-Jalankan migrasi plugin **hingga versi 7** melalui **System → Plugins**, lalu buka menu **Pengawasan & Pemeliharaan** di modul stock take. Migrasi menambahkan tabel `inventory_watch_*` tanpa mengubah kondisi atau kode barang. Migrasi versi 6 tetap diperlukan untuk form inventaris. Migrasi versi 7 tidak menyediakan rollback penghapusan karena dokumen pemeriksaan merupakan bukti historis.
+Jalankan migrasi plugin **hingga versi 7** melalui **System → Plugins**, lalu gunakan menu **Checklist & Jadwal**, **Pemeriksaan**, **Temuan & Tindak Lanjut**, dan **Laporan** di modul stock take. Migrasi menambahkan tabel `inventory_watch_*` tanpa mengubah kondisi atau kode barang. Migrasi versi 6 tetap diperlukan untuk form inventaris. Migrasi versi 7 tidak menyediakan rollback penghapusan karena dokumen pemeriksaan merupakan bukti historis.
 
 ### Alur penggunaan
 
 1. **Checklist & Jadwal:** salin template contoh dan sesuaikan butir Sarana, Prasarana, serta Lingkungan Fisik. Isi objek dan petunjuk setiap butir; kosongkan objek untuk menghilangkannya pada versi baru. Maksimal 100 butir per template. Contoh bukan standar penilaian resmi.
-2. Pilih ruangan dan template, klik **Pilih cakupan**, lalu hubungkan tiap butir ke barang di ruangan tersebut atau pilih **Aspek ruangan**. Tentukan penanggung jawab, frekuensi, dan tanggal mulai/akhir. Frekuensi tersedia dari harian hingga tahunan. Jadwal tanggal 31 menggunakan akhir bulan pendek, lalu kembali ke tanggal 31 pada bulan yang memungkinkan.
-3. Menu otomatis mengirim POST terlindungi CSRF saat dibuka oleh pengguna dengan hak tulis. Setiap batch membentuk maksimal 50 pemeriksaan yang jatuh tempo, termasuk yang terlewat; batch dilanjutkan sampai selesai. Klik **Perbarui tampilan** setelah sinkronisasi. Tanpa cron atau notifikasi eksternal. Pengguna hak baca tidak memicu pembentukan data, tetapi dapat melihat jumlah jadwal yang belum dibentuk.
-4. **Pemeriksaan:** isi tanggal pelaksanaan sebenarnya, catatan, dan hasil setiap butir. Hasil selain **Baik** wajib memiliki alasan saat finalisasi. **Perlu tindakan** juga wajib memiliki penanggung jawab, prioritas, dan tenggat. Simpan draf sebelum mengelola foto melalui bagian **Kelola foto bukti per butir**, karena setiap penyimpanan foto memuat ulang dokumen.
+2. Klik **Buat jadwal**, pilih ruangan dan template pada langkah pertama, lalu hubungkan tiap butir ke barang di ruangan tersebut atau pilih **Aspek ruangan**. Tentukan penanggung jawab, frekuensi, dan tanggal mulai/akhir. Frekuensi tersedia dari harian hingga tahunan. Jadwal tanggal 31 menggunakan akhir bulan pendek, lalu kembali ke tanggal 31 pada bulan yang memungkinkan.
+3. Menu otomatis mengirim POST terlindungi CSRF saat dibuka oleh pengguna dengan hak tulis. Setiap batch membentuk maksimal 50 pemeriksaan yang jatuh tempo, termasuk yang terlewat; batch dilanjutkan sampai selesai. Daftar diperbarui otomatis setelah sinkronisasi selama tidak ada isian yang belum tersimpan. Tanpa cron atau notifikasi eksternal. Pengguna hak baca tidak memicu pembentukan data, tetapi dapat melihat jumlah jadwal yang belum dibentuk.
+4. **Pemeriksaan:** isi tanggal pelaksanaan sebenarnya, catatan, dan hasil setiap butir. Hasil selain **Baik** wajib memiliki alasan saat finalisasi. **Perlu tindakan** juga wajib memiliki penanggung jawab, prioritas, dan tenggat. Foto dapat dipilih langsung pada setiap butir. **Simpan foto butir** menyimpan draf terlebih dahulu, kemudian memperbarui foto tanpa memuat ulang dokumen. **Simpan draf** menyimpan isian dan semua foto yang dipilih secara berurutan. Finalisasi dilakukan setelah seluruh penyimpanan berhasil.
 5. Finalisasi mengunci checklist dan foto, serta membuat satu temuan per butir yang perlu tindakan. Hasil baik juga disimpan sebagai dokumen. Koreksi berikutnya berupa catatan tambahan; gunakan **Pemeriksaan ulang** untuk kegiatan baru yang terhubung ke dokumen asal. Pemeriksaan insidental membutuhkan alasan dan dilaporkan terpisah dari kegiatan rutin.
 6. **Tindak Lanjut:** mulai pekerjaan, catat perbaikan/pemeliharaan, tanggal, dan biaya opsional. Pengguna yang menyimpan tercatat sebagai pelaksana. Pengajuan membutuhkan catatan serta minimal satu foto hasil. **Tanpa pekerjaan** membutuhkan alasan tetapi tidak mewajibkan foto.
 7. Verifikator mengisi catatan hasil, lalu menerima atau mengembalikan pekerjaan untuk perbaikan. Verifikasi sendiri diperbolehkan. Bukti yang pernah diajukan tidak dapat dihapus; setelah penolakan, pengajuan berikutnya menjadi catatan tindakan baru.
@@ -198,3 +198,28 @@ php tests/watch_integration_test.php
 ```
 
 Tes integrasi memakai `INVENTORY_TEST_DSN`, `INVENTORY_TEST_USER`, dan `INVENTORY_TEST_PASSWORD`. Gunakan database pengujian dengan izin CREATE/DROP TABLE serta TRIGGER, PHP PDO MySQL, GD, cURL, dan izin subprocess/server HTTP localhost. Seluruh tabel fixture bernama acak `iw_test_*`, tidak membaca data aplikasi, dan dibersihkan setelah pengujian. Tes meliputi konkurensi, alur lengkap, endpoint hak akses/CSRF, unggahan multipart, rollback berkas, histori setelah penghapusan, cakupan, dan HTML laporan. Jika autoloader Composer tersedia, tes juga menghasilkan PDF biner; autoloader pengujian terpisah dapat ditentukan melalui `INVENTORY_TEST_AUTOLOAD`.
+
+
+## Antarmuka reaktif
+
+Kelima menu menggunakan tampilan bersama di dalam admin SLiMS. **Inventaris Barang** tetap memakai alur ruangan → daftar barang. Identitas, detail inventaris, kondisi, dan foto dipisahkan pada formulir; informasi administratif ruangan dapat dibuka saat dibutuhkan.
+
+**Checklist & Jadwal** dibuka pada tab Jadwal. Tab Template checklist menyediakan editor tambah/hapus butir, maksimal 100 butir. Pembuatan jadwal memiliki tiga langkah: ruangan/checklist, cakupan barang, serta waktu/petugas. Kembali ke langkah sebelumnya mempertahankan isian; mengganti ruangan atau template memuat ulang cakupan dan mengosongkan pemetaan barang yang tidak lagi sesuai.
+
+Filter periode, perpustakaan, ruangan, serta status yang relevan diproses di server sebelum pagination. Tautan pemeriksaan dan temuan mempertahankan konteks daftar untuk tombol kembali. Ringkasan pengawasan berada di **Laporan**; rincian tambahan dapat dibuka tanpa memenuhi tampilan awal.
+
+Pada pemeriksaan, penugasan tampil ketika hasil **Perlu tindakan** dipilih. Foto ditampilkan dan dikelola di butir yang sama. Penyimpanan draf dan foto merupakan transaksi terpisah yang dijalankan berurutan menggunakan versi dokumen dari server. Jika salah satu unggahan gagal, draf dan foto yang sudah berhasil tetap tersimpan; isian serta file yang belum terkirim dipertahankan. Jika respons jaringan hilang, muat ulang untuk memeriksa keadaan dokumen sebelum mengulangi unggahan. Tidak ada autosave berkala.
+
+Alpine.js **3.14.9** disertakan lokal di `assets/` beserta lisensi MIT; instalasi tidak membutuhkan CDN atau build Node. Loader hanya memasang runtime sekali dan komponen mengikuti pergantian fragment AJAX SLiMS. CSS dibatasi pada `.inventory-ui`. Tidak ada perubahan skema database atau tata letak PDF untuk pembaruan antarmuka ini.
+
+Endpoint pengawasan tetap memakai `watch_action`, token CSRF, hak akses, dan respons `ok`, `message`, `url`. Penyimpanan pemeriksaan/foto menambahkan `document` berisi `id`, `version`, `status`, serta metadata `photos` (`id`, `result_id`, dan URL foto melalui controller). Permintaan GET `tab=scope` menyediakan butir template dan barang ruangan untuk wizard. Semua URL memakai ID menu terdaftar; `dashboard` lama dipetakan ke Laporan ketika diterima melalui menu aktif. Bookmark yang memakai hash `supervision.php` lama perlu dibuka kembali dari menu baru.
+
+Tes tambahan UI dan routing:
+
+```sh
+php tests/watch_routes_test.php
+node tests/watch_forms_test.cjs
+php tests/watch_integration_test.php
+```
+
+Tes integrasi memerlukan `INVENTORY_TEST_DSN`, `INVENTORY_TEST_USER`, dan `INVENTORY_TEST_PASSWORD`. Tes menggunakan tabel berawalan acak `iw_test_*` dan membersihkannya setelah selesai; jangan menjalankan dengan awalan milik proses tes lain. Untuk pengujian browser fixture, lihat `tests/watch_ui_browser_test.cjs`.

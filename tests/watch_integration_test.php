@@ -2,6 +2,8 @@
 declare(strict_types=1);
 namespace SLiMS { class DB {public static \PDO $connection;public static function getInstance(): \PDO{return self::$connection;}} }
 namespace {
+if (!defined('AWB')) define('AWB','/');
+if (!defined('SWB')) define('SWB','/');
 use SLiMS\Plugins\Inventory\Supervision as W;
 use SLiMS\Plugins\Inventory\PhotoStorage;
 require __DIR__.'/../src/WatchRecurrence.php';require __DIR__.'/../src/Supervision.php';require __DIR__.'/../src/ItemPhotos.php';require __DIR__.'/../src/PhotoStorage.php';require __DIR__.'/../src/WatchPdf.php';require __DIR__.'/../src/WatchView.php';
@@ -25,7 +27,7 @@ $reject=function(callable $call,string $label):void{try{$call();}catch(RuntimeEx
 if(in_array('--worker',$argv??[],true)){file_put_contents(sys_get_temp_dir().'/'.$prefix.'ready','1');$mutate('sync');exit;}
 // HTTP fixture exercises real is_uploaded_file(), shared by all photo mutations.
 if(PHP_SAPI==='cli-server' && isset($_GET['controller'])) {
- define('INDEX_AUTH',true); define('SB',sys_get_temp_dir().'/'.$prefix.'bootstrap/'); define('LIB',SB.'lib/'); define('AWB','/'); define('FLS','files'); define('DS',DIRECTORY_SEPARATOR);
+ define('INDEX_AUTH',true); define('SB',sys_get_temp_dir().'/'.$prefix.'bootstrap/'); define('LIB',SB.'lib/'); define('FLS','files'); define('DS',DIRECTORY_SEPARATOR);
  class utility {public static function havePrivilege($module,$mode='r'){return ($_GET['access']??'write')!=='none' && ($mode==='r'||($_GET['access']??'write')==='write');}}
  function do_checkIP($scope){} function writeLog(...$args){}
  require __DIR__.'/../supervision.php'; return;
@@ -69,7 +71,8 @@ try{
  $bad=$save;unset($bad['results'][$resultIds[3]]);$reject(fn()=>$mutate('inspection',$bad),'incomplete finalization rejected');
  $bad=$save;$bad['results'][$resultIds[1]]['notes']='';$reject(fn()=>$mutate('inspection',$bad),'action note required');
  $bad=$save;$bad['results'][$resultIds[1]]['assignee_id']='';$reject(fn()=>$mutate('inspection',$bad),'finding assignment required');
- $mutate('inspection',$save);$mutate('inspection',$save);
+ $saved=$mutate('inspection',$save);check($saved['document']['version']===2 && $saved['document']['status']==='final','mutation returns committed document version and status');$mutate('inspection',$save);
+ $finalRows=$watch->inspections($watch->filter(['from'=>$start,'to'=>$today,'inspection_status'=>'final']));check(count($finalRows)===1&&$finalRows[0]['status']==='final','inspection status filter applies before pagination');
  check((int)$db->query('SELECT COUNT(*) FROM inventory_watch_findings')->fetchColumn()===1,'finalization atomically creates findings exactly once');
  $reject(fn()=>$mutate('inspection',array_replace($save,['submit_mode'=>'draft','version'=>2])),'final inspection cannot be overwritten');
  $reject(fn()=>$mutate('result_photos',['inspection_id'=>$id,'result_id'=>$resultIds[0],'version'=>2]),'final evidence immutable');
@@ -94,6 +97,7 @@ try{
  [$status,$body]=$endpoint([],['watch_action'=>'sync','csrf_token'=>'wrong']);check($status===403&&!json_decode($body,true)['ok'],'controller rejects invalid CSRF');
  $beforeCount=(int)$db->query('SELECT COUNT(*) FROM inventory_watch_inspections')->fetchColumn();
  [$status,$body]=$endpoint(['access'=>'read']);check($status===200&&str_contains($body,'data-write="0"')&&(int)$db->query('SELECT COUNT(*) FROM inventory_watch_inspections')->fetchColumn()===$beforeCount,'controller GET renders without database mutation');
+ [$status,$body]=$endpoint(['tab'=>'scope','access'=>'read','location_id'=>1,'template_id'=>$template]);$scope=json_decode($body,true);check($status===200&&count($scope['items'])===4&&count($scope['assets'])===1,'read-only wizard scope endpoint returns room assets and checklist');
  [$status,$body]=$endpoint([],['watch_action'=>'sync','csrf_token'=>'test-csrf']);check($status===200&&json_decode($body,true)['ok'],'authorized controller POST uses AJAX response');
  $im=imagecreatetruecolor(20,20);$upload=sys_get_temp_dir().'/'.$prefix.'upload.png';imagepng($im,$upload);imagedestroy($im);
  $post=function(array $data,string $file)use($address):array{$curl=curl_init('http://'.$address);$data['photos[0]']=new CURLFile($file,'image/png','proof.png');curl_setopt_array($curl,[CURLOPT_POST=>true,CURLOPT_POSTFIELDS=>$data,CURLOPT_RETURNTRANSFER=>true,CURLOPT_TIMEOUT=>10]);$response=curl_exec($curl);if($response===false)throw new RuntimeException(curl_error($curl));curl_close($curl);return json_decode($response,true,512,JSON_THROW_ON_ERROR);};
@@ -116,6 +120,7 @@ try{
  $reject(fn()=>$mutate('incidental',['location_id'=>2,'template_id'=>$template,'reason'=>'Salah ruang','parent_id'=>$id]),'reinspection must match original room');
  $incidentalDoc=$watch->document($incidental);$photoInput=['watch_action'=>'result_photos','inspection_id'=>$incidental,'result_id'=>$incidentalDoc['results'][0]['id'],'version'=>1];
  $response=$post($photoInput,$upload);check($response['ok'],'draft result accepts real multipart proof');
+ check($response['result']['document']['version']===2 && count($response['result']['document']['photos'])===1 && !isset($response['result']['document']['photos'][0]['filename']),'photo response returns new version and public metadata');
  $ownPhoto=$db->query('SELECT id FROM inventory_watch_photos WHERE result_id='.(int)$incidentalDoc['results'][0]['id'])->fetchColumn();
  $reject(fn()=>$mutate('result_photos',['inspection_id'=>$incidental,'result_id'=>$resultIds[0],'version'=>2]),'result upload target must belong to inspection');
  $reject(fn()=>$mutate('result_photos',['inspection_id'=>$incidental,'result_id'=>$incidentalDoc['results'][0]['id'],'version'=>2,'remove'=>[$draftPhoto['id']]]),'draft photo deletion cannot target another document');
@@ -150,9 +155,13 @@ try{
  $longSchedule=$mutate('schedule',['location_id'=>3,'template_id'=>$template,'frequency'=>'daily','start_date'=>date('Y-m-d',strtotime('-60 days')),'end_date'=>$today,'assignee_id'=>2])['schedule_id'];
  $batch=$mutate('sync');check($batch['generated']===50&&$batch['more'],'catch-up bounded to fifty occurrences');
  $batch=$mutate('sync');check($batch['generated']===11&&!$batch['more']&&(int)$db->query('SELECT COUNT(*) FROM inventory_watch_inspections WHERE schedule_id='.$longSchedule)->fetchColumn()===61,'next batch resumes without skips');
- foreach (['dashboard','setup','inspections','findings','reports','new'] as $tab) {
+ foreach (['setup','template','schedule','inspections','findings','reports','new'] as $tab) {
      ob_start();\SLiMS\Plugins\Inventory\WatchView::render($watch,'/plugin',$tab,$filter,true,'csrf',[]);$page=ob_get_clean();
+     if ($out=getenv('INVENTORY_VIEW_OUTPUT')) file_put_contents($out.'/'.$tab.'.html',$page);
      check(str_contains($page,'id="inventory-watch"')&&!str_contains($page,'Warning:'),'writer page renders: '.$tab);
+ }
+ if ($out=getenv('INVENTORY_VIEW_OUTPUT')) {
+     ob_start();\SLiMS\Plugins\Inventory\WatchView::render($watch,'/plugin','inspection',$filter,true,'csrf',['record'=>$incidental]);$page=ob_get_clean();file_put_contents($out.'/inspection.html',$page);
  }
  // Emit PDF through installed runtime if available, without touching application paths.
  $autoload=getenv('INVENTORY_TEST_AUTOLOAD')?:__DIR__.'/../vendor/autoload.php';if(is_file($autoload)){require_once $autoload;$pdf=new \Mpdf\Mpdf(['tempDir'=>sys_get_temp_dir(),'exposeVersion'=>false]);$pdf->WriteHTML($detail);check(str_starts_with($pdf->Output('','S'),'%PDF-'),'mPDF renders document with evidence');$periodPdf=new \Mpdf\Mpdf(['tempDir'=>sys_get_temp_dir(),'exposeVersion'=>false]);$periodPdf->WriteHTML($html);check(str_starts_with($periodPdf->Output('','S'),'%PDF-'),'mPDF renders period report');}

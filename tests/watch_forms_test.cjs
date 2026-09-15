@@ -1,18 +1,33 @@
-const fs=require('node:fs');const vm=require('node:vm');const assert=require('node:assert/strict');const path=require('node:path');
-const source=fs.readFileSync(path.join(__dirname,'../src/WatchView.php'),'utf8');
-const script=source.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/<\?=json_encode[\s\S]*?\?>/g,'{}');
-class Data{constructor(form){this.values=new Map(Object.entries(form?.fields||{}));}set(k,v){this.values.set(k,v);}get(k){return this.values.get(k);}[Symbol.iterator](){return this.values[Symbol.iterator]();}}
-const makeRoot=(write='0')=>({dataset:{write,base:'/plugin',csrf:'csrf'},isConnected:true,querySelector:()=>({textContent:'',append(){}})});
-const event=(name='submit_mode',value='final')=>({preventDefault(){},stopImmediatePropagation(){},submitter:{name,value}});
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),path=require('node:path');
+const source=fs.readFileSync(path.join(__dirname,'../assets/inventory.js'),'utf8');
+class Data {
+ constructor(form){this.values=new Map(Object.entries(form?.fields||{}));}
+ set(k,v){this.values.set(k,String(v));} get(k){return this.values.get(k);} append(k,v){this.values.set(k,v);}
+}
+const providers={},stores={};let navigation='';
+const context={window:{addEventListener(){}},document:{currentScript:{dataset:{alpine:'/alpine.js'}},addEventListener(){},createElement:()=>({setAttribute(){}}),body:{appendChild(){}}},Alpine:{data:(name,value)=>providers[name]=value,store:(name,value)=>value?(stores[name]=value):stores[name]},FormData:Data,URL:{revokeObjectURL(){}},location:{href:'http://inventory.test'},jQuery:()=>({simbioAJAX:url=>navigation=url}),fetch:async()=>({ok:true,json:async()=>({ok:true})}),console};
+context.window.Alpine=context.Alpine;vm.createContext(context);vm.runInContext(source,context);
+const UI=context.window.InventoryUI;
+const form={action:'/inspection',fields:{watch_action:'inspection',csrf_token:'csrf',id:'7',version:'1'},elements:{namedItem:name=>({get value(){return form.fields[name]||''},set value(value){form.fields[name]=value}})},setAttribute(){},removeAttribute(){},querySelectorAll:()=>[],querySelector:()=>null};
+function inspection(){return Object.assign(providers.inventoryInspection({id:7,version:1,results:{11:{outcome:'good'},12:{outcome:'good'}},evidence:{11:{photos:[],files:['photo1'],remove:[],previews:[]},12:{photos:[],files:['photo2'],remove:[],previews:[]}}}),{$el:form,form,$dispatch(){},$nextTick:fn=>fn()});}
 (async()=>{
- let requests=0;let navigation='';let root=makeRoot();let resolve;
- const context={window:{},document:{getElementById:()=>root,createElement:()=>({})},FormData:Data,URLSearchParams,Error,SyntaxError,confirm:()=>true,jQuery:()=>({simbioAJAX:url=>navigation=url}),fetch:async()=>{requests++;return{json:async()=>({ok:true,generated:0,more:false})}}};
- vm.createContext(context);vm.runInContext(script,context);await new Promise(r=>setImmediate(r));assert.equal(requests,0,'read-only page never posts sync');
- const error={hidden:true,textContent:''},button={disabled:false};const form={dataset:{},fields:{watch_action:'inspection',csrf_token:'csrf'},action:'/plugin',querySelector:()=>error,querySelectorAll:()=>[button]};
- context.fetch=async(url,request)=>{requests++;assert.equal(request.body.get('submit_mode'),'final');assert.equal(request.body.get('csrf_token'),'csrf');await new Promise(r=>resolve=r);return{json:async()=>({ok:true,url:'/inspection/1'})};};
- assert.equal(context.window.inventoryWatchSave(event(),form),false);assert.equal(button.disabled,true);context.window.inventoryWatchSave(event(),form);assert.equal(requests,1,'duplicate submit prevented');resolve();await new Promise(r=>setImmediate(r));assert.equal(navigation,'/inspection/1');assert.equal(button.disabled,false);
- context.fetch=async()=>({json:async()=>({ok:false,message:'Tanggal wajib diisi'})});context.window.inventoryWatchSave(event(),form);await new Promise(r=>setImmediate(r));assert.equal(error.hidden,false);assert.equal(error.textContent,'Tanggal wajib diisi');assert.equal(button.disabled,false);
- context.fetch=async()=>({json:async()=>{throw new SyntaxError('login')}});context.window.inventoryWatchSave(event(),form);await new Promise(r=>setImmediate(r));assert.match(error.textContent,/sesi/);
- root=makeRoot('1');requests=0;context.fetch=async(url,request)=>{assert.equal(request.body.get('watch_action'),'sync');assert.equal(request.body.get('csrf_token'),'csrf');requests++;return{json:async()=>({ok:true,generated:requests===1?50:2,more:requests===1})};};vm.runInContext(script,context);await new Promise(r=>setImmediate(r));await new Promise(r=>setImmediate(r));assert.equal(requests,2,'writer drains bounded catch-up batches');assert.equal(context.window.inventoryWatchSyncBusy,false);
- console.log('ok   read-only sync guard, CSRF payload, submit intent, duplicate suppression, error preservation, login response and batched synchronization');
+ let requests=[];let version=1;UI.confirm=async()=>true;
+ UI.request=async(url,data)=>{requests.push({action:data.get('watch_action'),version:data.get('version'),mode:data.get('submit_mode'),id:data.get('result_id')});return {ok:true,url:'/final',document:{version:++version,status:'draft',photos:[]}};};
+ let state=inspection();state.validateFinal=()=>true;
+ await state.run('final');assert.deepEqual(requests.map(r=>r.action),['inspection','result_photos','result_photos','inspection']);assert.deepEqual(requests.map(r=>r.version),['1','2','3','4']);assert.equal(requests[3].mode,'final');assert.equal(navigation,'/final');assert.equal(state.version,5);assert.equal(state.evidence[11].files.length,0);
+ state=inspection();requests=[];version=1;navigation='';
+ UI.request=async(url,data)=>{requests.push(data.get('watch_action'));if(data.get('result_id')==='12')throw new Error('Unggahan butir kedua gagal');return {document:{version:++version,photos:[]}};};
+ await state.run('draft');assert.equal(state.version,3);assert.equal(state.evidence[11].files.length,0);assert.equal(state.evidence[12].files.length,1);assert.match(state.error,/Draf pemeriksaan tersimpan/);assert.equal(navigation,'');assert.equal(state.busy,false);
+ // Retry sends only the pending file and uses the updated version.
+ requests=[];UI.request=async(url,data)=>{requests.push(data.get('result_id'));return {document:{version:++version,photos:[]}};};
+ await state.run('draft');assert.deepEqual(requests,[undefined,'12']);assert.equal(state.evidence[12].files.length,0);
+ state=inspection();let resolve;let count=0;
+ UI.request=async()=>{count++;await new Promise(r=>resolve=r);return {document:{version:2,photos:[]}};};
+ state.evidence[11].files=[];state.evidence[12].files=[];
+ const pending=state.run('draft');await state.run('draft');assert.equal(count,1);resolve();await pending;
+ state=inspection();UI.request=async()=>{throw new Error('Data berubah pada sesi lain. Muat ulang sebelum melanjutkan.');};await state.run('draft');assert.equal(state.version,1);assert.equal(state.evidence[11].files.length,1);assert.match(state.error,/Data berubah/);
+ state=inspection();count=0;UI.request=async()=>{count++;throw new Error('Koneksi terputus.');};await state.run('draft');await state.run('draft');assert.equal(count,1,'lost response cannot blindly repeat uploads');assert.equal(state.uncertain,true);
+ let root={dataset:{write:'0',csrf:'csrf'},isConnected:true};let page=Object.assign(providers.inventoryPage(),{$el:root});count=0;UI.request=async()=>{count++;return {generated:0,more:false}};await page.sync();assert.equal(count,0);
+ root.dataset={write:'1',csrf:'csrf',base:'/plugin',list:'0'};UI.request=async(url,data)=>{assert.equal(data.get('csrf_token'),'csrf');count++;return {generated:count===1?50:2,more:count===1}};await page.sync();assert.equal(count,2);assert.equal(context.window.inventoryWatchSyncBusy,false);
+ console.log('ok serial draft/photo/final, version propagation, partial failure/retry, duplicate guard, conflict preservation, uncertain response, read-only guard, batched sync');
 })().catch(e=>{console.error(e);process.exitCode=1;});

@@ -1,4 +1,5 @@
 <?php
 defined('INDEX_AUTH') || die('Direct access not allowed!');
-$inventoryWatchPage = 'reports';
+$inventoryWatchPage = 'inspections';
+$inventoryWorkspaceView='tasks';
 require __DIR__ . '/src/WatchController.php';

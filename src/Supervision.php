@@ -59,6 +59,12 @@ final class Supervision
                 case 'finding': $this->finding($input,$uploads,$actor); $result=['tab'=>'finding','record'=>(int)$input['id']]; break;
                 default: throw new RuntimeException('Aksi pengawasan tidak dikenal.');
             }
+            if (in_array($action, ['inspection','result_photos'], true)) {
+                $id=(int)($action==='inspection'?$input['id']:$input['inspection_id']);
+                $saved=$this->row('inspections',$id);
+                $photos=$this->query('SELECT id,result_id FROM inventory_watch_photos WHERE inspection_id=? AND result_id IS NOT NULL ORDER BY id',[$id])->fetchAll(PDO::FETCH_ASSOC);
+                $result['document']=['id'=>$id,'version'=>(int)$saved['version'],'status'=>$saved['status'],'photos'=>$photos];
+            }
             $this->db->commit(); $this->storage->cleanup($this->removed); $this->created=[];
             return $result;
         } catch (\Throwable $e) {
@@ -228,7 +234,9 @@ final class Supervision
             $this->query('UPDATE inventory_watch_findings SET status=?,closed_at=?,version=version+1 WHERE id=?',[$mode==='verify'?'closed':'working',$mode==='verify'?date('Y-m-d H:i:s'):null,$id]);
             $this->event($inspection,$id,$mode,$notes,$actor); return;
         }
-        if (!in_array($mode,['draft','submit'],true) || $status!=='working') throw new RuntimeException('Transisi status tidak tersedia. Muat ulang halaman.');
+        if (!in_array($mode,['draft','submit'],true) || !in_array($status,['open','working'],true)) throw new RuntimeException('Transisi status tidak tersedia. Muat ulang halaman.');
+        // Opening a form is read-only. Start is recorded with the first successful save.
+        if ($status==='open') $this->event($inspection,$id,'start','Pekerjaan dimulai.',$actor);
         $kind=$input['kind']??'';
         if (!in_array($kind,['repair','maintenance','none'],true)) throw new RuntimeException('Jenis tindakan tidak valid.');
         $description=$this->text($input['description']??'','Uraian pekerjaan/alasan');
@@ -270,7 +278,7 @@ final class Supervision
         $from=(string)($input['from']??date('Y-m-01')); $to=(string)($input['to']??date('Y-m-t'));
         WatchRecurrence::date($from); WatchRecurrence::date($to);
         if ($to<$from) throw new RuntimeException('Periode tidak valid.');
-        return ['from'=>$from,'to'=>$to,'library'=>$this->text($input['library']??'','Kode perpustakaan',false,3),'room'=>max(0,(int)($input['room']??0))];
+        return ['from'=>$from,'to'=>$to,'library'=>$this->text($input['library']??'','Kode perpustakaan',false,3),'room'=>max(0,(int)($input['room']??0)), 'inspection_status'=>in_array($input['inspection_status']??'', ['pending','draft','final'],true)?$input['inspection_status']:'', 'finding_status'=>in_array($input['finding_status']??'', ['open','working','review','closed'],true)?$input['finding_status']:''];
     }
     public function where(array $filter,string $alias='i'): array {
         $where="$alias.due_date BETWEEN ? AND ?"; $args=[$filter['from'],$filter['to']];
@@ -279,7 +287,9 @@ final class Supervision
         return [$where,$args];
     }
     public function inspections(array $filter,int $page=1,int $limit=20): array {
-        [$where,$args]=$this->where($filter); $offset=max(0,$page-1)*$limit;
+        [$where,$args]=$this->where($filter);
+        if (!empty($filter['inspection_status'])) { $where.=' AND i.status=?'; $args[]=$filter['inspection_status']; }
+        $offset=max(0,$page-1)*$limit;
         return $this->query("SELECT i.* FROM inventory_watch_inspections i WHERE $where ORDER BY i.due_date DESC,i.id DESC LIMIT ".(int)$limit.' OFFSET '.$offset,$args)->fetchAll(PDO::FETCH_ASSOC);
     }
     public function summary(array $filter, bool $includeFindings=false): array {

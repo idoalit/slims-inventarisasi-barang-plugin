@@ -174,6 +174,12 @@ if (empty($_SESSION['inventory_csrf'])) {
     $_SESSION['inventory_csrf'] = bin2hex(random_bytes(24));
 }
 $csrf = (string) $_SESSION['inventory_csrf'];
+require_once __DIR__ . '/src/Workspace.php';
+require_once __DIR__ . '/src/WorkspaceRequests.php';
+if ($_SERVER['REQUEST_METHOD']==='GET' && ($_GET['legacy']??'')!=='1') {
+    \SLiMS\Plugins\Inventory\Workspace::shell('inventory',$canWrite); return;
+}
+$isWorkspaceSave = ($_GET['workspace']??'')==='save';
 $isCodeRequest = $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['form_action'] ?? '') === 'reserve_item_code';
 $reservedCode = null;
 $message = '';
@@ -194,7 +200,19 @@ try {
             throw new RuntimeException('Token formulir tidak valid. Muat ulang halaman lalu coba lagi.');
         }
 
+        if ($isWorkspaceSave && ($cached=\SLiMS\Plugins\Inventory\WorkspaceRequests::cached('inventory'))) { header('Content-Type: application/json; charset=utf-8'); echo json_encode($cached); return; }
         $postAction = inventory_post('form_action');
+        // Merge omitted fields only after authorization. A hidden section must never erase old data.
+        if (in_array($postAction,['save_item','save_location'],true) && (int)($_POST['record_id']??0)>0) {
+            $table=$postAction==='save_item'?'inventory_items':'inventory_locations';
+            $existing=$db->prepare('SELECT * FROM '.$table.' WHERE id=?');
+            $existing->execute([(int)$_POST['record_id']]);
+            $old=$existing->fetch(PDO::FETCH_ASSOC);
+            if (!$old) throw new RuntimeException('Data tidak ditemukan.');
+            if ($isWorkspaceSave && isset($_POST['expected_updated_at']) && $_POST['expected_updated_at']!==$old['updated_at']) throw new RuntimeException('Data berubah pada sesi lain. Muat ulang sebelum melanjutkan.');
+            $_POST=array_merge($old,$_POST);
+        }
+
         $now = date('Y-m-d H:i:s');
         $uid = isset($_SESSION['uid']) ? (int) $_SESSION['uid'] : null;
 
@@ -431,7 +449,7 @@ try {
         }
     }
 
-    if (!$isPhotoSave && !$isPhotoDelete && !$isCodeRequest) {
+    if (!$isPhotoSave && !$isPhotoDelete && !$isCodeRequest && !$isWorkspaceSave) {
     $masterLocations = $db->query(
         'SELECT location_id, location_name FROM mst_location ORDER BY location_name, location_id'
     )->fetchAll(PDO::FETCH_ASSOC);
@@ -472,6 +490,12 @@ try {
     $masterLocations = [];
     $messageType = 'danger';
     $message = 'Terjadi kesalahan internal. Silakan coba lagi atau hubungi administrator.';
+}
+
+if ($isWorkspaceSave) {
+    header('Content-Type: application/json; charset=utf-8'); header('Cache-Control: private, no-store');
+    if ($messageType==='danger') http_response_code(str_contains($message,'sesi lain')?409:422);
+    echo json_encode(\SLiMS\Plugins\Inventory\WorkspaceRequests::remember('inventory',['ok'=>$messageType!=='danger','message'=>$message,'record'=>$id??null,'location_id'=>$_GET['location_id']??($_POST['location_id']??null),'code'=>$reservedCode,'errors'=>$messageType==='danger'?\SLiMS\Plugins\Inventory\WorkspaceRequests::errors($message):new stdClass()])); return;
 }
 
 if ($isCodeRequest) {
@@ -529,10 +553,7 @@ $printBase = AWB . 'plugin_container.php?' . http_build_query([
     'action' => 'print_pdf',
 ]);
 ?>
-<style>
-    .inventory-toolbar{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}.inventory-card{border:1px solid #ddd;border-radius:.35rem;margin:1rem 0;background:#fff}.inventory-card-header{padding:.75rem 1rem;border-bottom:1px solid #ddd;font-weight:700;background:#f7f7f7}.inventory-card-body{padding:1rem}.inventory-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1rem}.inventory-grid .wide{grid-column:1/-1}.inventory-actions{display:flex;gap:.35rem;flex-wrap:wrap}.inventory-empty{padding:2rem;text-align:center;color:#777}@media(max-width:800px){.inventory-grid{grid-template-columns:1fr}}
-    .inventory-location{padding:.65rem 1rem}.inventory-location-top{display:flex;align-items:center;justify-content:space-between;gap:.5rem 1rem;flex-wrap:wrap}.inventory-location-heading{min-width:0;flex:1 1 16rem;overflow-wrap:anywhere}.inventory-location-title{font-size:1rem;font-weight:700;margin:0 0 .2rem}.inventory-location-meta{font-size:.85rem;display:flex;gap:.25rem 1rem;flex-wrap:wrap}.inventory-location-details{margin-top:.4rem;font-size:.85rem}.inventory-location-details summary{cursor:pointer;width:fit-content}.inventory-location-details dl{display:flex;flex-wrap:wrap;gap:.4rem 1.5rem;margin:.5rem 0 0}.inventory-location-details dl>div{min-width:0;overflow-wrap:anywhere}.inventory-location-details dt,.inventory-location-details dd{display:inline;margin:0}.inventory-location-details dt{margin-right:.3rem}
-</style>
+
 <script>
 window.inventoryMakeCode = async function(button) {
     const form = button.form;
@@ -646,7 +667,7 @@ window.inventorySaveWithPhotos = function(event, form) {
         .then(response => response.json())
         .then(result => {
             if (!result.ok) throw new Error(result.message);
-            jQuery('#mainContent').simbioAJAX(result.url);
+            (window.InventoryUI && window.InventoryUI.clean(), jQuery('#mainContent').simbioAJAX(result.url));
         })
         .catch(error => {
             errorBox.textContent = error instanceof SyntaxError ? 'Sesi berakhir atau unggahan melebihi batas server. Muat ulang halaman dan periksa ukuran foto.' : (error.message || 'Penyimpanan gagal. Silakan coba lagi.');
@@ -657,24 +678,11 @@ window.inventorySaveWithPhotos = function(event, form) {
 };
 </script>
 
-<div class="menuBox">
-  <div class="menuBoxInner circulationIcon">
-    <div class="per_title">
-	    <h2><?php echo __('Inventaris Barang Perpustakaan'); ?></h2>
-    </div>
-    <div class="infoBox">
-        <?php echo __('Catat barang berdasarkan lokasi/ruangan dan cetak Kartu Inventaris Ruangan dalam PDF.'); ?>
-    </div>
-    <div class="sub_section m-0 p-0">
-      <div class="btn-group">
-            <a class="btn btn-default" href="<?= inventory_e(inventory_url()) ?>">Daftar Lokasi</a>
-            <?php if ($canWrite): ?>
-                <a class="btn btn-primary" href="<?= inventory_e(inventory_url(['action' => 'add_location'])) ?>">Tambah Lokasi</a>
-            <?php endif; ?>
-        </div>
-    </div>
-  </div>
-</div>
+<?php require_once __DIR__ . '/src/InventoryUi.php'; \SLiMS\Plugins\Inventory\InventoryUi::assets(); ?>
+<div class="inventory-ui" x-data="inventoryPage" @input="if(['save_item','save_location'].includes($event.target.form?.elements.namedItem('form_action')?.value)) dirty=true" @change="if(['save_item','save_location'].includes($event.target.form?.elements.namedItem('form_action')?.value)) dirty=true">
+<?php \SLiMS\Plugins\Inventory\InventoryUi::header('inventory'); ?>
+<div class="inv-breadcrumb"><a href="<?= inventory_e(inventory_url()) ?>">Ruangan</a><?php if ($action !== 'list'): ?><span> / <?= inventory_e(['view_location'=>'Daftar barang','add_item'=>'Tambah barang','edit_item'=>'Ubah barang','add_location'=>'Tambah ruangan','edit_location'=>'Ubah ruangan','view_photos'=>'Foto barang'][$action] ?? 'Daftar') ?></span><?php endif; ?></div>
+<?php if ($canWrite && !in_array($action, ['view_location','add_item','edit_item','add_location','edit_location','view_photos'],true)): ?><a class="btn btn-primary" href="<?= inventory_e(inventory_url(['action'=>'add_location'])) ?>">+ Tambah Ruangan</a><?php endif; ?>
 
 <?php if ($message !== ''): ?><div class="alert alert-<?= inventory_e($messageType) ?> m-3"><?= inventory_e($message) ?></div><?php endif; ?>
 
@@ -704,7 +712,7 @@ window.inventorySaveWithPhotos = function(event, form) {
                 <div class="form-group"><label>Lokasi Perpustakaan</label><select class="form-control" name="slims_location_id"><option value="">Tidak ditentukan</option><?php foreach ($masterLocations as $masterLocation): ?><option value="<?= inventory_e($masterLocation['location_id']) ?>" <?= (string) $defaults['slims_location_id'] === (string) $masterLocation['location_id'] ? 'selected' : '' ?>><?= inventory_e($masterLocation['location_name'] . ' (' . $masterLocation['location_id'] . ')') ?></option><?php endforeach; ?></select></div>
                 <div class="form-group"><label>No. Kode Lokasi Kartu</label><input class="form-control" name="location_code" maxlength="100" value="<?= inventory_e($defaults['location_code']) ?>"><small class="form-text text-muted">Kode lokasi boleh sama untuk beberapa ruangan.</small></div>
                 <div class="form-group"><label>Ruangan <span class="text-danger">*</span></label><input class="form-control" required name="room_name" maxlength="255" value="<?= inventory_e($defaults['room_name']) ?>"></div>
-                <div class="form-group"><label>Provinsi</label><input class="form-control" name="province" maxlength="150" value="<?= inventory_e($defaults['province']) ?>"></div>
+                </div><details><summary>Informasi administratif & penandatangan kartu</summary><div class="inventory-grid"><div class="form-group"><label>Provinsi</label><input class="form-control" name="province" maxlength="150" value="<?= inventory_e($defaults['province']) ?>"></div>
                 <div class="form-group"><label>Kabupaten/Kota</label><input class="form-control" name="regency_city" maxlength="150" value="<?= inventory_e($defaults['regency_city']) ?>"></div>
                 <div class="form-group"><label>Unit</label><input class="form-control" name="unit_name" maxlength="255" value="<?= inventory_e($defaults['unit_name']) ?>"></div>
                 <div class="form-group"><label>Satuan Kerja</label><input class="form-control" name="work_unit" maxlength="255" value="<?= inventory_e($defaults['work_unit']) ?>"></div>
@@ -716,7 +724,7 @@ window.inventorySaveWithPhotos = function(event, form) {
                 <div class="form-group"><label>NIP/Identitas Pejabat</label><input class="form-control" name="knowing_identity" maxlength="100" value="<?= inventory_e($defaults['knowing_identity']) ?>"></div>
                 <div class="form-group"><label>NIP/Identitas Pengurus</label><input class="form-control" name="manager_identity" maxlength="100" value="<?= inventory_e($defaults['manager_identity']) ?>"></div>
             </div>
-            <button class="btn btn-primary" type="submit">Simpan Lokasi</button> <a class="btn btn-default" href="<?= inventory_e(inventory_url()) ?>">Batal</a>
+            </details><button class="btn btn-primary" type="submit">Simpan Lokasi</button> <a class="btn btn-default" href="<?= inventory_e(inventory_url()) ?>">Batal</a>
         </form>
     </div></div>
 
@@ -733,11 +741,11 @@ window.inventorySaveWithPhotos = function(event, form) {
         <form class="submitViaAJAX" method="post" enctype="multipart/form-data" onsubmit="return inventorySaveWithPhotos(event, this)" action="<?= inventory_e(inventory_url(['action' => 'view_location', 'location_id' => (int) $defaults['location_id'], 'photo_save' => '1'])) ?>">
             <input type="hidden" name="csrf_token" value="<?= inventory_e($csrf) ?>"><input type="hidden" name="form_action" value="save_item"><input type="hidden" name="code_form_token" value="<?= inventory_e(bin2hex(random_bytes(32))) ?>"><input type="hidden" name="record_id" value="<?= (int) $defaults['id'] ?>">
             <div class="inventory-grid">
-                <div class="form-group"><label>Lokasi/Ruangan <span class="text-danger">*</span></label><select class="form-control" name="location_id" required><option value="">Pilih lokasi</option><?php foreach ($locations as $location): ?><option value="<?= (int) $location['id'] ?>" <?= (int) $defaults['location_id'] === (int) $location['id'] ? 'selected' : '' ?>><?= inventory_e(($location['location_code'] ? $location['location_code'] . ' — ' : '') . $location['room_name']) ?></option><?php endforeach; ?></select></div>
+                <h4 class="inv-section-title">Identitas barang</h4><div class="form-group"><label>Lokasi/Ruangan <span class="text-danger">*</span></label><select class="form-control" name="location_id" required><option value="">Pilih lokasi</option><?php foreach ($locations as $location): ?><option value="<?= (int) $location['id'] ?>" <?= (int) $defaults['location_id'] === (int) $location['id'] ? 'selected' : '' ?>><?= inventory_e(($location['location_code'] ? $location['location_code'] . ' — ' : '') . $location['room_name']) ?></option><?php endforeach; ?></select></div>
                 <div class="form-group"><label>Jenis/Nama Barang <span class="text-danger">*</span></label><input class="form-control" required name="item_name" maxlength="255" value="<?= inventory_e($defaults['item_name']) ?>"></div>
                 <div class="form-group"><label>Merk/Model</label><input class="form-control" name="brand_model" maxlength="255" value="<?= inventory_e($defaults['brand_model']) ?>"></div>
                 <div class="form-group"><label>No. Seri Pabrik</label><input class="form-control" name="serial_number" maxlength="255" value="<?= inventory_e($defaults['serial_number']) ?>"></div>
-                <div class="form-group"><label>Ukuran</label><input class="form-control" name="item_size" maxlength="150" value="<?= inventory_e($defaults['item_size']) ?>"></div>
+                <h4 class="inv-section-title">Detail inventaris</h4><div class="form-group"><label>Ukuran</label><input class="form-control" name="item_size" maxlength="150" value="<?= inventory_e($defaults['item_size']) ?>"></div>
                 <div class="form-group"><label>Bahan</label><input class="form-control" name="material" maxlength="150" value="<?= inventory_e($defaults['material']) ?>"></div>
                 <div class="form-group"><label>Tahun Pembuatan/Pembelian</label><input class="form-control" type="number" min="1000" max="<?= (int) date('Y') + 1 ?>" name="acquisition_year" value="<?= inventory_e($defaults['acquisition_year']) ?>"></div>
                 <div class="form-group"><label for="inventory-item-code">No. Kode Barang</label>
@@ -748,19 +756,19 @@ window.inventorySaveWithPhotos = function(event, form) {
                 </div>
                 <div class="form-group"><label>Jumlah Barang/Register</label><input class="form-control" name="quantity_register" maxlength="150" value="<?= inventory_e($defaults['quantity_register']) ?>" placeholder="Contoh: 1 / 001"></div>
                 <div class="form-group"><label>Harga Beli/Perolehan (Rp)</label><input class="form-control" type="number" min="0" step="0.01" name="acquisition_price" value="<?= inventory_e($defaults['acquisition_price']) ?>"></div>
-                <div class="form-group"><label>Keadaan Barang</label><select class="form-control" name="item_condition"><option value="B" <?= $defaults['item_condition'] === 'B' ? 'selected' : '' ?>>Baik (B)</option><option value="KB" <?= $defaults['item_condition'] === 'KB' ? 'selected' : '' ?>>Kurang Baik (KB)</option><option value="RB" <?= $defaults['item_condition'] === 'RB' ? 'selected' : '' ?>>Rusak Berat (RB)</option></select></div>
+                <h4 class="inv-section-title">Kondisi & keterangan</h4><div class="form-group"><label>Keadaan Barang</label><select class="form-control" name="item_condition"><option value="B" <?= $defaults['item_condition'] === 'B' ? 'selected' : '' ?>>Baik (B)</option><option value="KB" <?= $defaults['item_condition'] === 'KB' ? 'selected' : '' ?>>Kurang Baik (KB)</option><option value="RB" <?= $defaults['item_condition'] === 'RB' ? 'selected' : '' ?>>Rusak Berat (RB)</option></select></div>
                 <div class="form-group wide"><label>Keterangan</label><textarea class="form-control" name="notes" rows="3"><?= inventory_e($defaults['notes']) ?></textarea></div>
             </div>
-            <fieldset class="form-group">
+            <fieldset class="form-group" x-data="inventoryUpload">
                 <legend style="font-size:1rem">Foto barang</legend>
                 <?php if ($defaults['id']): inventory_photos((int) $defaults['id'], true); endif; ?>
                 <label for="inventory-item-photos">Tambah foto</label>
-                <input onchange="inventoryPreviewPhotos(this)" id="inventory-item-photos" class="form-control" type="file" name="item_photos[]" accept="image/jpeg,image/png,image/webp" multiple aria-describedby="inventory-photo-help">
+                <input @change="change($event)" id="inventory-item-photos" class="form-control" type="file" name="item_photos[]" accept="image/jpeg,image/png,image/webp" multiple aria-describedby="inventory-photo-help">
                 <small id="inventory-photo-help" class="form-text text-muted">Maksimal 5 foto per barang, masing-masing 2 MB. JPEG, PNG, atau WebP; maksimal 8 megapiksel dan 4096 piksel per sisi. Foto disimpan saat Simpan Barang diklik.</small>
-                <div class="inventory-photo-preview" aria-live="polite" style="display:flex;flex-wrap:wrap;gap:1rem;margin-top:.75rem"></div>
+                <div class="inventory-photo-preview watch-photos" aria-live="polite"><template x-for="preview in previews" :key="preview"><img :src="preview" alt="Pratinjau foto barang"></template></div>
             </fieldset>
             <div class="alert alert-danger inventory-save-error" role="alert" hidden></div>
-            <button class="btn btn-primary" type="submit">Simpan Barang</button> <a class="btn btn-default" href="<?= inventory_e(inventory_url(['action' => 'view_location', 'location_id' => (int) $defaults['location_id']])) ?>">Batal</a>
+            <div class="inv-footer"><button class="btn btn-primary" type="submit">Simpan Barang</button> <a class="btn btn-default" href="<?= inventory_e(inventory_url(['action' => 'view_location', 'location_id' => (int) $defaults['location_id']])) ?>">Batal</a></div>
         </form>
         <?php endif; ?>
     </div></div>
@@ -840,7 +848,7 @@ window.inventorySaveWithPhotos = function(event, form) {
             }
             $grid->modifyColumnContent(7, 'callback{inventory_location_actions}');
             $gridHtml = $grid->createDataGrid($dbs, 'inventory_locations l LEFT JOIN mst_location ml ON ml.location_id = l.slims_location_id', 20, $canWrite);
-            echo $gridHtml;
+            echo '<div class="table-wrap">'.$gridHtml.'</div>';
             if (!$grid->num_rows) {
                 echo '<div class="inventory-empty">Belum ada lokasi inventaris yang sesuai filter.</div>';
             }
@@ -881,7 +889,7 @@ window.inventorySaveWithPhotos = function(event, form) {
         $grid->modifyColumnContent(2, 'callback{inventory_item_name}');
         $grid->modifyColumnContent(6, 'callback{inventory_grid_price}');
         $gridHtml = $grid->createDataGrid($dbs, 'inventory_items i JOIN inventory_locations l ON l.id = i.location_id', 20, $canWrite);
-        echo $gridHtml;
+        echo '<div class="table-wrap">'.$gridHtml.'</div>';
         if (!$grid->num_rows) {
             echo '<div class="inventory-empty">Belum ada barang yang sesuai filter.</div>';
         }
@@ -889,3 +897,5 @@ window.inventorySaveWithPhotos = function(event, form) {
     </div></div>
     <?php endif; ?>
 <?php endif; ?>
+
+</div>

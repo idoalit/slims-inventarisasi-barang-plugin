@@ -8,19 +8,16 @@
  * Author URI: https://github.com/idoalit
  */
 
+use SLiMS\Plugins;
+
 defined('INDEX_AUTH') || die('Direct access not allowed!');
 
-$plugin = \SLiMS\Plugins::getInstance();
-$plugin->registerMenu(
-    'stock_take',
-    'Inventaris Barang',
-    __DIR__ . '/index.php',
-    'Kelola inventaris barang perpustakaan dan cetak kartu inventaris per lokasi.'
-);
-
-$plugin->registerMenu(
-    'stock_take',
-    'Pengawasan & Pemeliharaan',
-    __DIR__ . '/supervision.php',
-    'Jadwal pemeriksaan, temuan, tindak lanjut, verifikasi, dan laporan bukti.'
-);
+Plugins::group('Inventaris Barang', function() {
+    foreach ([
+        ['Tugas','inspection.php','Pemeriksaan, tindak lanjut, dan verifikasi.'],
+        ['Ruangan & Barang','index.php','Kelola ruangan, barang, dan kartu inventaris.'],
+        ['Jadwal','checklist-and-schedule.php','Atur pemeriksaan rutin ruangan.'],
+        ['Checklist','findings-and-follow-up.php','Kelola checklist dan riwayat versinya.'],
+        ['Laporan','report.php','Tinjau capaian dan cetak laporan periode.'],
+    ] as [$label,$file,$description]) Plugins::registerMenu('stock_take',$label,__DIR__.'/'.$file,$description);
+});
